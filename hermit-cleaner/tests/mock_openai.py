@@ -10,6 +10,10 @@ is all the Cleaner uses). Every chat request body is recorded in `state.requests
   "401"        401 for every request
   "slow"       like "ok", but each answer takes 1.5 s (for Stop)
   "same"       answers with the passage unchanged
+  "whole"      Rewrite whole text: answers each pass by its system prompt (a critique
+               list, WHOLE_BODY with typographic junk for the rewrite, a review with one
+               flagged sentence, the body with that sentence fixed, "OK" for the
+               fact check, and the text unchanged for the proofreading)
 """
 import json
 import threading
@@ -17,6 +21,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PREFIX = "\u201cNew\u201d \u2014 \u200b"
+WHOLE_BODY = ("The travel costs for the Berlin fair came in about 4,500 euros over the estimate, so I went back over the numbers. "
+              "You'll get the full overview of the key figures from me by Tuesday, ahead of the Q3 budget review next Thursday.")
+WHOLE_FIXED = WHOLE_BODY.replace("so I went back over the numbers", "and I checked the numbers twice")
 ENGLISH = "The committee looked at the plan again and decided that it will not be put to a vote this year at all."
 
 
@@ -75,6 +82,17 @@ def make_handler(state):
             if mode == "slow":
                 time.sleep(1.5)
             paragraph = body["messages"][-1]["content"]
+            if mode == "whole":
+                system = body["messages"][0]["content"]
+                content = ("- \"I hope this email finds you well\": stock phrase" if system.startswith("You are a sharp editor")
+                           else PREFIX + WHOLE_BODY if system.startswith("You rewrite a text")
+                           else "- \"so I went back over the numbers\" -> a tidy transition" if system.startswith("Check this text")
+                           else WHOLE_FIXED if system.startswith("A reviewer flagged")
+                           else paragraph if system.startswith("Proofread")
+                           else "OK")
+                return self.send_json(200, {"id": "x", "object": "chat.completion", "model": body.get("model"),
+                                            "choices": [{"index": 0, "finish_reason": "stop",
+                                                         "message": {"role": "assistant", "content": content}}]})
             content = ENGLISH if mode == "english" else paragraph if mode == "same" else PREFIX + paragraph
             try:
                 self.send_json(200, {"id": "x", "object": "chat.completion", "model": body.get("model"),

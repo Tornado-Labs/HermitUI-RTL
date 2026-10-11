@@ -8,11 +8,13 @@ explicitly overrides it. If you are an AI agent, read the root file first.
 > `CLAUDE.md -> AGENTS.md` symlink can be created here; don't commit it.
 
 ## Status
-v0.3.2: cleanup; rewording by sentence or paragraph at three change levels (Light, the
+v0.4.0: cleanup; rewording by sentence or paragraph at three change levels (Light, the
 default, Medium, Strong), with a tone and an extra instruction, through an
 OpenAI-compatible server or, in the `-wllama` build, a GGUF model in the tab; AI stock
 phrases and set-up contrasts found per language, named in the prompt and reworded first;
-greetings and sign-offs left alone; typos.
+greetings and sign-offs left alone; typos. v0.4.0 adds **Rewrite whole text**: the
+whole text rewritten in several passes (critique, rewrite, sentence review, fact check
+and fix, contrasts, proofreading), with optional facts about the writer (About you).
 
 ## Build & test
 ```bash
@@ -148,6 +150,14 @@ poll with `page.evaluate` instead.
   - Qwen3.8-27B at Medium, German, by sentence turned "wir bedauern zutiefst" into "wir
     sind froh" with no retry involved: German meaning errors are a model limit, not a
     prompt one. Read German rewrites, don't count them.
+- **Rewrite whole text.** `wholeRewrite` (pure section, "Stage 2b") runs the passes of
+  `WHOLE_PASSES` with the model call injected (`chat(passId, messages, maxTokens)`), so
+  `tests/whole.test.mjs` scripts every pass. Each text reply goes through
+  `acceptWholeRewrite`; `wholeSpotNotes` finds the spots for the spots pass in code. The
+  DOM side (`rewriteWhole`, `chatOnce`) only feeds it the chosen backend.
+  **Rewrite freely** is the same call with `o.free`: a `plan` pass
+  (`buildPlanMessages`) before the rewrite, content rules in place of the keep-every-claim
+  ones, a fact check that allows dropped points, and no missing-number errors for the fix.
 - **Tests:** pure logic goes in unit tests that slice the real functions out of
   `src/script.js` (`tests/extract.mjs`, the same approach as `../tests/`). Renaming a
   function fails the suite; update the lists there. DOM behaviour goes in

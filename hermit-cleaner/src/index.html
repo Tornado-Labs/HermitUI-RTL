@@ -87,6 +87,10 @@
                     <span>Also</span>
                     <input type="text" id="optExtra" class="text-field" maxlength="300" placeholder="optional instruction, e.g. use &quot;du&quot;, British spelling" aria-label="An extra instruction for the model">
                 </label>
+                <label class="field field-wide" title="Used by Rewrite whole text: facts about you that the rewrite may tell as your own experience. It invents none of its own.">
+                    <span>About you</span>
+                    <input type="text" id="optDetails" class="text-field" maxlength="600" placeholder="optional: who you are, a real example" aria-label="Facts about you for Rewrite whole text">
+                </label>
                 <label class="step">
                     <input type="checkbox" id="optTypos">
                     <span><strong>Typos</strong></span>
@@ -109,6 +113,8 @@
                 <span class="status" id="status" role="status" aria-live="polite"></span>
                 <div class="run-actions">
                     <button type="button" class="secondary-btn" id="rerollBtn" disabled title="New typos on the same text, without calling the model again">🎲 Reroll typos</button>
+                    <button type="button" class="secondary-btn" id="wholeBtn" disabled title="Rewrite the whole text in one piece, in several passes against common AI patterns (structure, voice, stock phrases, set-up contrasts), then check it against the original. Uses Clean, Tone, Also, About you and Typos. It may reorder, merge or drop points: read the result.">✍️ Rewrite whole text</button>
+                    <button type="button" class="secondary-btn" id="freeBtn" disabled title="Like Rewrite whole text, but the rewrite may also change the content: drop or merge points, change the order and the structure, and add typical everyday examples. Facts it keeps stay right and it adds no figures, names or dates. Read the result.">🔀 Rewrite freely</button>
                     <button type="button" class="primary-btn" id="runBtn" disabled title="Ctrl+Enter">Run</button>
                     <button type="button" class="stop-btn" id="stopBtn" hidden>Stop</button>
                 </div>

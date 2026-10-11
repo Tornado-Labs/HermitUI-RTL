@@ -1,10 +1,11 @@
 # HermitUI Cleaner
 
 *Clean up text another model wrote: hidden characters out, typography plain, some
-sentences or paragraphs reworded by your own local model, and a few natural typos.*
+sentences or paragraphs reworded by your own local model (or the whole text rewritten
+in several passes), and a few natural typos.*
 
-> **Status: v0.3.2.** One self-contained HTML file in two flavours:
-> [`dist/hermit-cleaner-standalone.html`](dist/hermit-cleaner-standalone.html) (≈ 290 KB)
+> **Status: v0.4.0.** One self-contained HTML file in two flavours:
+> [`dist/hermit-cleaner-standalone.html`](dist/hermit-cleaner-standalone.html) (≈ 380 KB)
 > rewords through a model server, and
 > [`dist/hermit-cleaner-wllama.html`](dist/hermit-cleaner-wllama.html) (≈ 3.6 MB) can also
 > run a small GGUF model right in the tab, with no server at all.
@@ -116,6 +117,29 @@ Three steps, each one optional:
    those are mostly nouns. **Reroll typos** makes new ones without calling the model
    again.
 
+### Rewrite whole text
+
+**✍️ Rewrite whole text** is a second way to run the model, beside **Run**: it rewrites
+the whole text in one piece instead of sentence by sentence, in several passes: a
+critique, the rewrite, a sentence review, a fact check against the original with a fix,
+a pass over the contrasts and stock phrases found in code, and a proofreading pass. A
+letter's greeting and sign-off are kept as they were. Clean, Tone, Also and Typos apply
+as for Run. **About you** takes a few facts about yourself that the rewrite may use as
+your own experience; it invents none. The report says what each pass did and what the
+fact checks found.
+
+It takes about ten model calls, so it is slow on a small model, and a small model
+follows its instructions less well than a large one. In the browser build each call
+carries the whole text plus the instructions: past about 2,000 characters, raise
+**Context window** in the settings above 4096.
+
+**🔀 Rewrite freely** runs the same passes with one more at the start, a plan, and lets
+the rewrite change the content: it may drop a generic or repeated point, merge points,
+change the order and the structure, and add typical everyday examples. The text's main
+claim stays, the facts it keeps stay right, and it adds no figures, names or dates. A
+number that went with a dropped point is listed in the report. Read the result: it is
+no longer the same text.
+
 The output shows every change: hover a highlight to see what was there before.
 **Copy** copies the plain text.
 
@@ -145,6 +169,8 @@ The output shows every change: hover a highlight to see what was there before.
   detector that reads the whole text (ChatGPT's, for one) still points at a textbook
   structure, claims without sources and missing personal detail, and fixing those
   means adding content, which the Cleaner never does.
+- **Rewrite whole text** changes far more than Reword, so it can drop or merge a point
+  or shift a meaning, even with its fact checks. Read the result before you use it.
 
 ## Where the stock-phrase list comes from
 

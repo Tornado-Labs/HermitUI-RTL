@@ -260,6 +260,49 @@ def scenarios(page, port, state, browser_name):
     check("the report says so", "1 sentence that was nothing but stock phrases was removed." in page.text_content("#report"), page.text_content("#report"))
     page.select_option("#optUnit", "paragraph")
 
+    print("\n-- Rewrite whole text, passes and the letter frame")
+    from mock_openai import WHOLE_FIXED
+    state.mode = "whole"
+    state.requests.clear()
+    set_steps(page, clean=True, reword=False)
+    page.fill("#optDetails", "I run the finance team.")
+    letter = ("Hi Sarah,\n\nI hope this email finds you well. I wanted to reach out regarding the Q3 budget review next Thursday. "
+              "I will share a comprehensive overview of the key figures by Tuesday. The travel costs for the Berlin fair exceeded "
+              "our estimate by roughly 4,500 euros.\n\nBest regards,\nTom\n")
+    set_input(page, letter)
+    page.click("#wholeBtn")
+    ok = wait_for(page, "!document.body.classList.contains('is-running') && !!document.getElementById('status').textContent", 15)
+    out = output(page)
+    status = page.text_content("#status")
+    systems = [r["messages"][0]["content"] for r in state.requests]
+    check("run finishes", ok and "Done" in status, status)
+    check("six passes: critique, rewrite, review, sentences, facts, proof", len(state.requests) == 6, len(state.requests))
+    check("greeting and sign-off never sent", all("Hi Sarah" not in r["messages"][-1]["content"] and "Tom" not in r["messages"][-1]["content"] for r in state.requests))
+    check("the rewrite uses the letter rules, the critique and the details",
+          "body of a letter" in systems[1] and "stock phrase" in systems[1] and "I run the finance team." in systems[1], systems[1][:300])
+    check("output keeps the frame around the fixed body", out == "Hi Sarah,\n\n" + WHOLE_FIXED + "\n\nBest regards,\nTom\n", repr(out))
+    check("the model's junk cleaned", "\u201c" not in out and "\u200b" not in out)
+    report = page.text_content("#report")
+    check("report on the rewrite", "Rewrite whole text:" in report and "greeting and the sign-off were kept" in report
+          and "flagged 1 sentence" in report and "found no errors" in report, report)
+    check("whole body marked as reworded", page.locator("#outputText .m-reword").count() == 1)
+    page.fill("#optDetails", "")
+
+    print("\n-- Rewrite freely: a plan before the rewrite, content changes allowed")
+    state.requests.clear()
+    set_input(page, letter)
+    page.click("#freeBtn")
+    ok = wait_for(page, "!document.body.classList.contains('is-running') && !!document.getElementById('status').textContent", 15)
+    out = output(page)
+    systems = [r["messages"][0]["content"] for r in state.requests]
+    check("run finishes", ok and "Done" in page.text_content("#status"), page.text_content("#status"))
+    check("eight passes: the plan after the critique, the filler cut before the proofreading", len(systems) == 8 and systems[1].startswith("You are an editor")
+          and "strict editor who cuts AI filler" in systems[6], len(systems))
+    check("the rewrite may change the content", "may change the content" in systems[2] and "may change the content" not in systems[0], systems[2][:300])
+    check("the fact check allows dropped points", "allowed to change the content" in systems[5], systems[5][:200])
+    check("output keeps the frame", out == "Hi Sarah,\n\n" + WHOLE_FIXED + "\n\nBest regards,\nTom\n", repr(out))
+    check("report names Rewrite freely", "Rewrite freely:" in page.text_content("#report"), page.text_content("#report"))
+
     print("\n-- typos and reroll")
     state.mode = "ok"
     set_steps(page, clean=True, reword=False, typos=True)

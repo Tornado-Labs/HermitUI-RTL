@@ -69,6 +69,22 @@ The comment at the top of `extract.mjs` shows how to see the real error.
     Light limits, refuses a reply that brings in stock phrases of its own, and lets a
     reply keep an introduction only when it starts with the original's own words
 
+- **`whole.test.mjs`** covers Rewrite whole text:
+  - `splitLetterFrame`: greeting and sign-off block apart (with the name and role lines
+    under it), the parts concatenating back exactly, no frame in an essay
+  - the prompts of every pass: letter or essay rules, the critique and the writer's
+    details going in, examples in the text's own language only, the fact check's form
+  - `factCheckErrors` ("OK", arrow lines only, points called fine dropped),
+    `missingNumbers`, `wholeSpotNotes` (contrasts incl. the German "nicht A, sondern B",
+    fillers such as "ehrlich gesagt", concessions, lists of three, sentences copied from
+    the original), and the rule set picked by `isFirstPerson`
+  - `acceptWholeRewrite`: an echo is no rewrite; a fix pass that changed nothing, went
+    back to the original, rewrote everything or dropped a number is refused
+  - `wholeRewrite` with a scripted chat: the pass order, no fix without errors, a lost
+    number sent to the fix, a refused rewrite tried twice and an echoed one then drafted
+    from notes, a greeting written into a letter body dropped, Stop keeping the finished
+    passes, a refused pass leaving the text as it was
+
 ## End-to-end (`e2e_cleaner.py`)
 
 Opens the built file from `file://` in Chromium and Firefox against
@@ -83,6 +99,9 @@ Opens the built file from `file://` in Chromium and Firefox against
   in the prompt, and the count in the report
 - a sentence that is nothing but stock phrases removed without a model call, shown as a
   removal, and reported
+- Rewrite whole text through the mock's `whole` mode: the six passes, the greeting and
+  sign-off never sent and kept in the output, the letter rules, critique and About you
+  in the rewrite prompt, the cleaned answer, and the report
 - that `localStorage`, `sessionStorage`, cookies and IndexedDB stay empty
 - the `-wllama` build: the backend switch, the error without a model, and, if
   `../benchmark/models/Qwen3-0.6B-Q4_K_M.gguf` exists, loading it from the file picker

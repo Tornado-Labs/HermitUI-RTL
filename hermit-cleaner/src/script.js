@@ -6,7 +6,7 @@
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.3.2";
+const APP_VERSION = "0.4.0";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -794,11 +794,11 @@ const CONTRAST_PATTERNS = {
         "(?<=(?:is|are|was|were) )not (?:about )?(?:a |an |the )?[\\p{L}\\p{N}'\u2019-]+(?: [\\p{L}\\p{N}'\u2019-]+){0,5},? but",
     ],
     // Only the rhetorical forms: "kein Titel, sondern ein Dienst", "nicht nur X, sondern
-    // auch Y", the halves split by a full stop. A plain correction ("nicht am Montag,
+    // auch Y", the halves split by a full stop ("Es geht nicht nur um X. Es geht um Y"). A plain correction ("nicht am Montag,
     // sondern am Dienstag") is ordinary German and stays unflagged.
     de: [
-        "kein(?:e[nmrs]?)? [^.;:!?]{1,50}?(?:,? sondern|[.!] (?:sondern|vielmehr|es geht vielmehr))",
-        "nicht (?:nur|blo\u00df|einfach|allein|lediglich) [^.;:!?]{1,60}?(?:,? sondern|[.!] (?:sondern|vielmehr|es geht vielmehr))",
+        "kein(?:e[nmrs]?)? [^.;:!?]{1,50}?(?:,? sondern|[.!] (?:sondern|vielmehr|es geht (?:vielmehr|darum|um)))",
+        "nicht (?:nur|blo\u00df|einfach|allein|lediglich) [^.;:!?]{1,60}?(?:,? sondern|[.!] (?:sondern|vielmehr|es geht (?:vielmehr|darum|um)))",
     ],
 };
 
@@ -1097,6 +1097,606 @@ function retryNote(verdict, passage) {
     if (verdict.address) return `Your first answer changed how the reader is addressed. The passage says "${verdict.address}"; keep exactly that form in every sentence.`;
     if (verdict.contrast) return `Your first answer still set up a contrast ("${verdict.contrast}"). Say the point directly this time, with no "not just", "not only" or "not ..., but".`;
     return `Your first answer was refused (${verdict.reason}). Avoid that this time.`;
+}
+
+// ========== Stage 2b: rewriting the whole text ==========
+
+// "Rewrite whole text" sends the text in one piece, in several passes, instead of
+// sentence by sentence, so the rewrite can change the shape of the text as well as its
+// wording: the opening, the order and weight of the points, the transitions, the voice
+// and the closing line.
+//
+// The passes, in order (WHOLE_PASSES): the model lists what reads as machine-written
+// (critique), rewrites the whole text with that list (rewrite; retry, then outline and
+// draft, when refused), reviews it sentence by sentence (review) and fixes only the
+// flagged sentences (sentences); then the model compares the result with the original
+// (facts), corrects only the errors it found (fix) and checks once more (recheck), for
+// the report only; then code finds the set-up contrasts, stock phrases and copied
+// sentences left (wholeSpotNotes) and the model fixes those spots (spots), after the fix
+// so that what it puts back is covered too. A proofreading pass ends it.
+
+// A letter's greeting line and its sign-off block (the closing line and the short name
+// lines under it) never go to the model: they come back reworded or as the name (see
+// SALUTATION_RE). Returns the text split into `head` + `body` + `tail`, which
+// concatenate back to it exactly; `letter` tells whether either was found.
+function splitLetterFrame(text) {
+    const t = String(text || "");
+    const lines = t.split("\n");
+    let a = 0, b = lines.length;
+    let i = 0;
+    while (i < lines.length && !lines[i].trim()) i++;
+    if (i < lines.length && SALUTATION_RE.test(lines[i].trim())) a = i + 1;
+    for (let j = lines.length - 1; j >= a; j--) {
+        const l = lines[j].trim();
+        if (!l) continue;
+        if (SALUTATION_RE.test(l)) { b = j; break; }
+        if (l.split(/\s+/).length > 4) break;
+    }
+    // A greeting with nothing under it, or a sign-off with nothing above it: no frame.
+    if (!lines.slice(a, b).join("\n").trim()) return { head: "", body: t, tail: "", letter: false };
+    let head = lines.slice(0, a).join("\n"), body = lines.slice(a, b).join("\n"), tail = lines.slice(b).join("\n");
+    if (a > 0) head += "\n";
+    if (b < lines.length) body += "\n";
+    // Blank lines around the body belong to the frame, so the model gets only the core.
+    const lead = body.match(/^\s*/)[0], trail = body.match(/\s*$/)[0];
+    head += lead;
+    tail = trail + tail;
+    body = body.slice(lead.length, body.length - trail.length);
+    return { head, body, tail, letter: a > 0 || b < lines.length };
+}
+
+// Examples named in the prompts, in the text's own language only (English for any
+// other, as with STOCK_PHRASES): naming German in an English prompt pulls small models
+// into German.
+const WHOLE_EXAMPLES = {
+    en: { contrast: "\"X is not (just) A, it is B\", \"not only A but also B\", \"it's not about A, it's about B\"", illustrate: "\"say\", \"for example\"", voice: "\"I think\", \"at least for us\", \"in my experience\"",
+        filler: "\"This clear structure builds trust.\", \"It is only one piece of the puzzle.\", \"That way everyday life gets calmer.\"", notFiller: "\"I put my phone in another room.\", \"Set a fixed time to stop.\"" },
+    de: { contrast: "\"X ist kein A, sondern B\", \"nicht nur A, sondern auch B\", \"Es geht nicht um A, sondern um B\"", illustrate: "\"etwa\", \"zum Beispiel\"", voice: "\"finde ich\", \"zumindest bei uns\", \"meiner Erfahrung nach\"",
+        filler: "\"Diese klare Struktur schafft Vertrauen.\", \"Das ist nur ein Teil des Puzzles.\", \"So kehrt mehr Ruhe in den Alltag ein.\"", notFiller: "\"Ich lege das Handy in einen anderen Raum.\", \"Man sollte feste Endzeiten haben.\"" },
+};
+
+// The fewest letters a text (a letter's body) needs for Rewrite whole text: a lone
+// greeting or a line or two is better served by Reword.
+const WHOLE_MIN_LETTERS = 40;
+
+// The passes, with the temperature each samples at and whether the model's answer is
+// notes (a list) or the new text. The rewrite runs warm; checks and fixes cold, so they
+// change only what they are asked to.
+const WHOLE_PASSES = [
+    { id: "critique", label: "reading the text", temperature: 0.6, notes: true },
+    // Rewrite freely only: the editor's plan of what to drop, merge, move and add.
+    { id: "plan", label: "planning the changes", temperature: 0.5, notes: true },
+    { id: "rewrite", label: "rewriting", temperature: 0.6 },
+    // The second try at a refused rewrite, sampled hotter.
+    { id: "retry", label: "rewriting again", temperature: 0.85 },
+    // When rewrite and retry both copied the text: the model lists its points as notes
+    // (outline) and writes the text from those (draft).
+    { id: "outline", label: "listing the points", temperature: 0.2, notes: true },
+    { id: "draft", label: "writing from the points", temperature: 0.7 },
+    { id: "review", label: "reviewing sentences", temperature: 0.3, notes: true },
+    { id: "sentences", label: "fixing sentences", temperature: 0.6 },
+    { id: "facts", label: "checking facts", temperature: 0.2, notes: true },
+    { id: "fix", label: "correcting", temperature: 0.2 },
+    { id: "recheck", label: "checking the corrections", temperature: 0.2, notes: true },
+    { id: "spots", label: "fixing contrasts and stock phrases", temperature: 0.5 },
+    // Rewrite freely only: the filler sentences the later passes put back, cut.
+    { id: "slop", label: "finding filler sentences", temperature: 0.2, notes: true },
+    { id: "proof", label: "proofreading", temperature: 0.1 },
+];
+
+function wholeLanguage(lang) {
+    return LANGUAGE_NAMES[lang] || null;
+}
+
+function wholeWriteIn(lang) {
+    const name = wholeLanguage(lang);
+    return name ? `Write in ${name}, the language of the text.` : "Write in the language of the text.";
+}
+
+// Pass "critique": what makes the text read as machine-written, as a short list.
+function buildCritiqueMessages(text) {
+    return [
+        { role: "system", content: "You are a sharp editor who spots machine-written text. List what in this text makes it read as written by an AI: "
+            + "buzzwords and abstract phrases, set-up contrasts (\"not just A, but B\"), lists of three, sentences that all have the same length "
+            + "and shape, paragraphs that each do one tidy job, points that are repeated, sweeping claims with no limit or example, "
+            + "smooth transitions, a closing line that sums up or sounds like a slogan, overly polite or overly enthusiastic filler. "
+            + "Quote the exact words. A short bullet list, at most 10 points, no rewrite." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Whether `text` is told in the first person (a post about the writer's own year), not
+// argued in general: "I"/"my" (or German "ich"/"mein") in at least 2 % of its words.
+function isFirstPerson(text, lang) {
+    const w = String(text || "").toLowerCase().match(/\p{L}+/gu) || [];
+    const own = lang === "de" ? /^(?:ich|mich|mir|mein(?:e[mnrs]?)?)$/ : /^(?:i|me|my|mine)$/;
+    return w.length > 0 && w.filter(x => own.test(x)).length / w.length >= 0.02;
+}
+
+// Pass "plan" (Rewrite freely): how the content changes, as a short list for the
+// rewrite: the main claim, the points to drop and merge, the opening, which point gets
+// the room, an example from the text's own facts, a limit or doubt, and the end.
+function buildPlanMessages(text, lang, critique, letter) {
+    const ex = WHOLE_EXAMPLES[lang] || WHOLE_EXAMPLES.en;
+    return [
+        { role: "system", content: "You are an editor. The text below is to be rewritten so that it reads like one real person wrote it, and the rewrite may change its content. "
+            + "Plan the content changes as short bullets:\n"
+            + (letter ? "- what to cut: empty courtesy, repeated assurances, filler (every request, promise, date, amount and apology stays)\n"
+                : "- the main claim of the text (what it argues for or tells), which stays, said plainly\n"
+                + "- at most two points to drop: generic ones any text on the topic would make, or ones that repeat another; every other argument stays\n")
+            + "- the points to merge into one\n"
+            + "- the opening: the writer's position or a plain fact from the text, in one sentence; not a scene, an example, a question or the thesis in grand words\n"
+            + "- the one point that gets most of the room, and the minor points that shrink to a clause or a sentence inside another paragraph instead of a paragraph of their own\n"
+            + "- at most one example, and only one built from the text's own facts; no invented scene\n"
+            + "- one limit or doubt the writer could honestly add: where a point doesn't hold, or what they are unsure of\n"
+            + "- the one point the text ends on: a specific one, not a summary, moral or outlook\n"
+            + "Keep the core message and the writer's position. Name each point by quoting a few of the text's words; say what to change, not how to word it. At most 10 bullets, no rewrite."
+            + (critique ? "\n\nAn editor found these machine-like features in the text:\n" + String(critique).trim() : "") },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "rewrite": the whole text, rewritten with the critique. `o.letter` (a greeting
+// or sign-off was cut off) picks the rules for a letter; otherwise those for an essay,
+// post or other prose. `o.details` are facts the writer gave about themselves, the
+// only experiences the rewrite may tell; `o.tone` and `o.extra` as for Reword.
+function buildWholeRewriteMessages(text, lang, o) {
+    o = o || {};
+    const ex = WHOLE_EXAMPLES[lang] || WHOLE_EXAMPLES.en;
+    const details = String(o.details || "").replace(/\s+/g, " ").trim().slice(0, 600);
+    const personal = isFirstPerson(text, lang);
+    const kind = o.letter ? [
+        "This is the body of a letter or e-mail (the greeting and the sign-off are kept apart and put back later, so write neither):",
+        "- Keep every point, apology, thanks, request and promise, in a natural order for the letter. Start with the matter itself, not with how the writer feels.",
+        "- Polite and correct, but plain: one apology or thanks said once and simply, no empty courtesy, no grand assurances.",
+    ] : [
+        "This is an essay, post, report or other prose:",
+        "- Start inside the topic, with a concrete point the text makes, not with a sentence that states the whole thesis.",
+        "- Don't give the points equal weight in neat parallel paragraphs: give the ones that carry the text room, and merge or shorten the weaker ones.",
+        // An argued text gets two illustrations and no pro, contra and solution layout; a
+        // first-person post keeps one illustration.
+        // Rewrite freely follows its plan instead: no invented scene, the points shrunk or
+        // grown, no announced transitions.
+        o.free ? "- No invented scenes or everyday illustrations: an example only where the plan names one from the text's own facts."
+            : personal ? `- Give one abstract claim a short everyday illustration, marked as one with ${ex.illustrate}. It must be typical, not a claimed fact: no names, figures or events.`
+            : `- Give two of the abstract claims a short everyday illustration each, marked as one with ${ex.illustrate}. It must be typical, not a claimed fact: no names, figures or events.`,
+        o.free ? "- Two to four paragraphs of clearly different length. A minor point goes inside another paragraph in a clause; no transition announces the next point (\"another point\", \"also important\", \"on top of that\")." : null,
+        personal ? null : "- Don't lay an argument out as pro, then contra, then the balanced solution: lead with what the writer cares about most and bring the counterpoint in where it bites.",
+        // Rewrite freely without details keeps the text's own voice: an "I" with no
+        // personal detail behind it reads as put on.
+        o.free && !details ? "- Keep the text's own voice: add no \"I think\" or \"in my view\" it doesn't have, and give the writer no experiences."
+            : details ? "- Opinions belong to the writer: let them say \"I\" or \"we\" where the text argues, instead of an impersonal \"one\" or \"you\". Their only experiences are the details given below."
+            : "- Opinions belong to the writer: let them say \"I think\" or \"in my view\" where the text argues, instead of an impersonal \"one\" or \"you\". Use \"I\" only for opinions, never for things that happened to the writer, and don't give the writer a role (a boss, an employee) the text doesn't give them.",
+        o.free && !details ? null : `- Where the text gives an opinion, a light marker such as ${ex.voice} now and then makes it one person's view. Not in every paragraph.`,
+        "- Don't tell it as a tidy arc (how it was, the struggle, the lesson, the advice): open with the part that matters most to the writer, and go back to how it began only where it is needed.",
+        "- End on a specific point, not on a summary, moral, outlook, advice or question to the audience. Advice or a question the text gives goes in earlier, where it fits, in one short sentence.",
+    ];
+    const lines = [
+        "You rewrite a text so that it reads like one real person wrote it, in their own voice, not like a polished AI answer. Careful readers know the AI patterns: "
+            + "an opening that states the thesis, every point covered in a tidy order with one paragraph each, smooth transitions, general claims with no example, "
+            + "an impersonal voice, and a closing line that sums up or zooms out to the big picture. Your rewrite must have none of them.",
+        "",
+        ...kind.filter(Boolean),
+        "For every kind of text:",
+        "- Sentence length varies a lot. Some sentences are very short. Paragraphs differ in length.",
+        "- Plain, concrete everyday words. No buzzwords, no stacked abstract nouns, no hype, no sayings that any text on the topic could contain.",
+        `- Never a set-up contrast such as ${ex.contrast}, not even across two sentences: say what it is.`,
+        "- No lists of three, no rhetorical questions, no dashes for drama, no colon before a punchline.",
+        "- Cut sentences that only repeat a point made before.",
+        ...(o.free ? [
+            "- You may change the content: drop generic or weak points, merge points, move them, and add a concrete typical example where a claim stays abstract. "
+                + "Keep the core message and the writer's position; a point you keep must still say what it said.",
+            "- Leave a dropped point out silently: never say what the text leaves out or skips. The plan below says what to change, not how to word it: use your own plain words, not the plan's.",
+            "- Every fact, name, number, date and amount you keep stays exactly right; address the reader as the text does (formal or informal).",
+            "- Add no new figures, names, dates, studies, quotes or events, and no experiences of the writer beyond the details given below. An added example is typical, not a claimed fact.",
+        ] : [
+            "- Keep what each claim says: you may say it in other words, shorten it or merge it with another, but don't turn it into a different claim, and add no claims of your own. "
+                + "Don't link claims with a cause or conclusion (\"which shows\", \"because\", \"so\") that the text doesn't state.",
+            "- Keep every fact, name, number, date and amount exactly right, and address the reader as the text does (formal or informal).",
+            "- Never invent details: no places, times, durations, causes, figures, people, events, scenes, feelings or promises the text doesn't state.",
+        ]),
+        "- Keep Markdown that is there (lists, bold), but add none.",
+        "- Correct grammar and real words only. " + wholeWriteIn(lang),
+    ];
+    if (REWORD_TONES[o.tone]) lines.push(REWORD_TONES[o.tone]);
+    const own = String(o.extra || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    if (own) lines.push("- " + own);
+    if (details) lines.push("- The writer gave these details about themselves and their situation. Work them in alongside the text's own points, as the writer's own experience where they fit: "
+        + "they add to the text and replace none of its points, facts or figures. Use them exactly as given, change no fact in them, and invent nothing beyond them: " + details);
+    if (o.retry) lines.push("- " + o.retry);
+    if (o.fromNotes) lines.push("- The user message holds the content of the text as notes, not the text: write the text from them, with every note in it, as running text in a few paragraphs of different length, not as a list. Add nothing the notes don't say: no subject line, no headings, no attachment, no detail.");
+    lines.push("- Reply with the rewritten text only: no introduction, no comments.");
+    const critique = String(o.critique || "").trim();
+    if (critique) lines.push("", "An editor found these machine-like features in the text; fix all of them:", critique);
+    const plan = String(o.plan || "").trim();
+    if (plan) lines.push("", "Follow this plan for the content:", plan);
+    return [{ role: "system", content: lines.join("\n") }, { role: "user", content: String(text).trim() }];
+}
+
+// Pass "outline": the content of `text` as short notes, for a draft written from them
+// (pass "draft", buildWholeRewriteMessages with `fromNotes`) when the rewrite copied.
+function buildOutlineMessages(text, lang) {
+    return [
+        { role: "system", content: "List the content of this text as short notes, one bullet per point: every fact, name, number, date, event, apology, thanks, request, promise, opinion and recommendation, in the order of the text. "
+            + "Notes, not sentences: as few of the text's own words as you can, but names, numbers and dates exactly as written, and no labels such as \"Topic:\". Keep who says what, and how the reader is addressed (formal or informal) as one note. "
+            + wholeWriteIn(lang) + " Reply with the notes only." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "review": the sentences a strict reviewer would still flag, as a list.
+function buildSentenceReviewMessages(text) {
+    return [
+        { role: "system", content: "Check this text for AI-typical writing patterns, sentence by sentence, the way a strict AI-text reviewer would: "
+            + "a punchy or generic opening, a rhetorical transition into the counter-argument, a polished closing line that rounds the text off, "
+            + "\"X without losing Y\" and other elegant pairings, a general claim drawn from a number, business phrases, sayings, "
+            + "a tidy pro, contra and solution order, parallel sentence shapes. "
+            + "For each sentence that would be flagged, give one bullet: the sentence quoted exactly, then after \" -> \" what makes it AI-typical. "
+            + "Only the sentences that would really be flagged, at most 6. No rewrite." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "sentences": rewrite only the flagged sentences.
+function buildSentenceFixMessages(text, lang, notes) {
+    return [
+        { role: "system", content: `A reviewer flagged these sentences of the text (the user message) as AI-typical:\n${String(notes).trim()}\n\n`
+            + "Rewrite only those sentences, the way a person would plainly say the same thing: less polished, more specific, no rhetorical shape. "
+            + "Rewrite them, don't cut them: what each one says stays in the text. The one exception is a closing line that only repeats or sums up what the text already said: cut it. "
+            + "A closing line that states a point or a recommendation stays, said plainly. Every other sentence stays word for word. "
+            + "Keep every fact and invent nothing. Correct grammar. " + wholeWriteIn(lang) + " Reply with the whole edited text only." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// The sentences of `text` that share a run of `n` words with `orig`: the original's
+// wording back in the result. Eight words, so that a kept fact ("came in about 4,500
+// euros over", the number counting as two words) does not count.
+function copiedSentences(orig, text, n = 8) {
+    const words = s => (String(s || "").toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+    const o = words(orig), grams = new Set();
+    for (let i = 0; i + n <= o.length; i++) grams.add(o.slice(i, i + n).join(" "));
+    const out = [];
+    for (const para of String(text || "").split(/\n\s*\n/)) {
+        for (const [a, b] of splitSentences(para)) {
+            const sentence = para.slice(a, b), w = words(sentence);
+            for (let i = 0; i + n <= w.length; i++) {
+                if (grams.has(w.slice(i, i + n).join(" "))) { out.push(sentence); break; }
+            }
+        }
+    }
+    return out;
+}
+
+// Fillers the rewrite tends to add ("ehrlich gesagt"), and for German the plain "nicht
+// A, sondern B" and other contrast shapes. CONTRAST_PATTERNS leaves the plain form alone
+// for Reword; in a text rewritten from scratch it is flagged.
+const WHOLE_TELLS = {
+    en: ["honestly", "to be honest", "frankly", "let['\u2019]s be honest"],
+    de: ["ehrlich gesagt", "offen gesagt", "mal ehrlich", "seien wir ehrlich"],
+};
+// The concession move ("Natuerlich kostet das Geld. Aber ..."); the "aber" may come
+// later in the second sentence ("Die Rechnung geht aber auf").
+const WHOLE_CONCESSIONS = {
+    en: ["(?:of course|sure|admittedly|granted|yes),? [^.;:!?]{1,80}?[.!;]\\s+(?:[^.;:!?]{0,40}? )?(?:but|however|still)"],
+    de: ["(?:nat\u00fcrlich|klar|sicher|zugegeben|ja),? [^.;:!?]{1,80}?[.!;]\\s+(?:[^.;:!?]{0,40}? )?(?:aber|jedoch|trotzdem)"],
+};
+// Three short items lined up ("schnell, effizient und sofort"); not a relative or other
+// subordinate clause after the comma. A list of facts gets flagged too, and the note
+// says to keep them.
+const WHOLE_TRIPLETS = {
+    en: ["\\p{L}+(?: \\p{L}+)?, (?!(?:which|that|who|whom|whose|when|where|because|to|if) )\\p{L}+(?: \\p{L}+)?,? (?:and|or) \\p{L}+(?: \\p{L}+){0,2}(?=[.,;:!?])"],
+    de: ["\\p{L}+(?: \\p{L}+)?, (?!(?:der|die|das|dem|den|dessen|deren|dass|wenn|weil|ob|um|wie|wo|was|als) )\\p{L}+(?: \\p{L}+)?,? (?:und|oder) \\p{L}+(?: \\p{L}+){0,2}(?=[.,;:!?])"],
+};
+const WHOLE_CONTRASTS = {
+    // and "Es geht nicht nur darum, dass X." with its other half left to the next sentence.
+    // Also "selten X, sondern Y", "weniger A als B", "nicht A. Es ging eher um B" and
+    // the trailing "Meine Haltung war entscheidend, nicht meine L\u00f6sungen."
+    de: ["(?:nicht|selten|kaum|nie) [^.;:!?]{1,60}?, sondern", "nicht nur [^.;:!?]{1,80}?[.!]", "weniger [^.;:!?]{1,40}? als [^.;:!?]{1,40}",
+        "nicht [^.;:!?]{1,60}?[.!] (?:es|das) (?:geht|ging) (?:eher|vielmehr|darum|um)", "(?<=, )nicht [^.;:!?,]{1,40}?[.!]"],
+};
+
+// Pass "spots", found in code: the set-up contrasts and stock phrases left in `text`,
+// and with `orig` the sentences copied from it, as notes for the model, or [] when
+// there are none.
+function wholeSpotNotes(text, lang, orig) {
+    const t = String(text || "");
+    const contrasts = findContrasts(t, lang);
+    for (const m of WHOLE_CONTRASTS[lang] ? t.matchAll(phraseListRe(WHOLE_CONTRASTS[lang])) : []) {
+        if (!contrasts.some(c => c.includes(m[0]) || m[0].includes(c))) contrasts.push(m[0]);
+    }
+    const notes = contrasts.map(c => `- set-up contrast: "${c}". Say the point directly, without the "not ... but" shape.`);
+    for (const [a, b] of findStockPhrases(t, lang)) {
+        const p = t.slice(a, b);
+        if (!contrasts.some(c => c.includes(p) || p.includes(c))) notes.push(`- stock phrase: "${p}". Cut it or say it plainly.`);
+    }
+    for (const m of t.matchAll(phraseListRe(WHOLE_TRIPLETS[lang] || WHOLE_TRIPLETS.en))) notes.push(`- list of three: "${m[0]}". Break the even triplet up: keep the items that are facts, but not as three matching parts in a row.`);
+    for (const m of t.matchAll(phraseListRe(WHOLE_CONCESSIONS[lang] || WHOLE_CONCESSIONS.en))) notes.push(`- concession: "${m[0]}". Give both facts plainly, without the "of course ... but" move.`);
+    for (const m of t.matchAll(phraseListRe(WHOLE_TELLS[lang] || WHOLE_TELLS.en))) notes.push(`- filler: "${m[0]}". Cut it; the sentence works without it.`);
+    if (orig) for (const c of copiedSentences(orig, t)) notes.push(`- copied from the original: "${c}". Say it in your own plain words, keeping every fact, name and number in it.`);
+    return [...new Set(notes)].slice(0, 10);
+}
+
+function buildSpotFixMessages(text, lang, notes) {
+    return [
+        { role: "system", content: `Edit the text (the user message): fix exactly these spots, rewording only the sentence each one is in, and keep the grammar correct:\n${notes.join("\n")}\n`
+            + "Every other sentence stays word for word. Don't add new facts. " + wholeWriteIn(lang) + " Reply with the edited text only." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "slop" (Rewrite freely): the sentences that only evaluate, sum up or decorate,
+// quoted as a list; cutFillerSentences takes them out in code, so the pass can't put
+// new filler in.
+function buildSlopFindMessages(text, lang) {
+    const ex = WHOLE_EXAMPLES[lang] || WHOLE_EXAMPLES.en;
+    return [
+        { role: "system", content: "You are a strict editor who cuts AI filler. List the sentences of this text that add no fact of their own: "
+            + "a sentence that only says what something achieves, creates or protects (\"This X helps / ensures / creates Y\"), one that sums up or evaluates what came before, "
+            + "a general remark any text on the topic could make, a saying or stock image (\"piece of the puzzle\", \"two sides of the same coin\"), a chain of abstract nouns. "
+            + `Filler looks like ${ex.filler}. `
+            + `A sentence that tells what someone does or should do, a fact, a number, a name or the text's main claim is never filler, like ${ex.notFiller}. `
+            + "For each filler sentence one bullet: the sentence quoted exactly as it stands, then after \" -> \" why it adds nothing. At most 5. No rewrite. If there is none, reply with exactly: OK" },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// `text` without the sentences quoted in `reply` (buildSlopFindMessages), at most a
+// third of its sentences, and never one with a digit, the writer's "I"/"we" or advice
+// ("should", "muss") in it (FILLER_KEEP_RE); a paragraph left empty goes. Returns the
+// new text and the sentences cut.
+const FILLER_KEEP_RE = {
+    en: /(?<![\p{L}])(?:i|me|my|we|us|our|should|must|need to|have to)(?![\p{L}])/iu,
+    de: /(?<![\p{L}])(?:ich|mich|mir|mein\p{L}*|wir|uns|unser\p{L}*|sollte\p{L}*|soll|sollen|muss|m\u00fcssen|musst)(?![\p{L}])/iu,
+};
+function cutFillerSentences(text, reply, lang) {
+    const keep = FILLER_KEEP_RE[lang] || FILLER_KEEP_RE.en;
+    const norm = x => String(x || "").replace(/[\u201c\u201d\u201e"]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const quotes = stripThinking(reply).split("\n").map(l => l.trim()).filter(l => /^(?:[-*\u2022]|\d+[.)])\s+\S/.test(l))
+        .map(l => norm(l.replace(/^(?:[-*\u2022]|\d+[.)])\s+/, "").replace(/\s+(?:->|\u2192).*$/, ""))).filter(q => q.length > 10);
+    const paras = String(text || "").split(/\n\s*\n/);
+    const total = paras.reduce((n, p) => n + splitSentences(p).length, 0);
+    const cut = [];
+    const out = paras.map(p => {
+        let kept = "", last = 0;
+        for (const [a, b] of splitSentences(p)) {
+            const sentence = p.slice(a, b), n = norm(sentence);
+            if (cut.length < Math.floor(total / 3) && !/\d/.test(sentence) && !keep.test(sentence) && quotes.some(q => q === n || (q.includes(n) && n.length > 20))) {
+                kept += p.slice(last, a);
+                cut.push(sentence.trim());
+            } else kept += p.slice(last, b);
+            last = b;
+        }
+        return (kept + p.slice(last)).replace(/[ \t]{2,}/g, " ").trim();
+    }).filter(Boolean);
+    return { text: out.join("\n\n"), cut };
+}
+
+// Pass "proof": grammar and spelling only.
+function buildProofreadMessages(text, lang) {
+    const name = wholeLanguage(lang) || "the language of the text";
+    return [
+        { role: "system", content: `Proofread this ${name} text. Correct only real mistakes: grammar, agreement, word order, spelling, a missing or wrong word, and punctuation that is wrong. `
+            + "Keep the wording, the informal phrasing, the sentence lengths and the order exactly as they are: casual is not a mistake, and don't make the text more polished or formal. "
+            + "If there is nothing to correct, reply with the text unchanged. Reply with the text only." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "facts": what the rewrite got wrong against the original (and the writer's
+// details), as a list, or "OK". What a rewrite is meant to drop (a repeated point, a
+// moral, a closing summary, a weaker argument) and the marked illustration are named
+// as not errors, so that the fix doesn't put them back. With `free` (Rewrite freely) a
+// dropped point and an added typical example are never errors either; a point kept
+// must still be right.
+function buildFactCheckMessages(orig, text, lang, details, free) {
+    const name = wholeLanguage(lang) || "the language of the text";
+    const d = String(details || "").replace(/\s+/g, " ").trim().slice(0, 600);
+    return [
+        { role: "system", content: "You compare an original text with a rewrite of it. List only real errors in the rewrite:\n"
+            + (free ? "- a fact, name, number, date or amount that the rewrite keeps but changed, and an apology, promise or request of the original that is missing or changed\n"
+                + "- a point that now says the opposite of the original, or a position of the writer turned around\n"
+                : "- a fact, name, number, date, amount, apology, promise or request of the original that is missing or changed\n")
+            + "- a reason or cause stated differently from the original\n"
+            + "- a form of address (formal or informal) that differs from the original\n"
+            + `- a grammar mistake or a word that doesn't exist in ${name}\n`
+            + `- a fact, number, name or event that the original doesn't have (a short typical illustration marked with ${(WHOLE_EXAMPLES[lang] || WHOLE_EXAMPLES.en).illustrate} is fine)\n`
+            + (free ? "" : "- a point, recommendation or conclusion of the original that is missing (unless it only repeated what the text had already said)\n")
+            + "Not errors: style, order, length, the same fact said in other words or split over two sentences (\"It should have arrived on the 6th. It didn't.\" says it didn't arrive as agreed on the 6th), "
+            + "a softer degree word (\"rarely\" for \"very rarely\"), a sentence cut because it repeated a point, a dropped saying or moral, a closing line that only summed up, "
+            + "a plainer, less emphatic wording of an apology, thanks or courtesy, an opinion now marked as the writer's own (\"I think\"), "
+            + "and a weaker argument merged into another. "
+            + (free ? "The rewrite was allowed to change the content: a dropped or merged point, a new order, and an added typical example (no names, figures or dates) are not errors either. " : "")
+            + "Write one bullet per error, in the form: - \"words from the rewrite\" -> what is wrong. "
+            + "Don't list what is correct or acceptable, and don't explain your reasoning. If there is no error, reply with exactly: OK" },
+        { role: "user", content: `Original:\n${String(orig).trim()}\n\n` + (d ? `Details the writer added (these may appear in the rewrite; check them too):\n${d}\n\n` : "") + `Rewrite:\n${String(text).trim()}` },
+    ];
+}
+
+// The numbers of `orig` (digits, with their inner separators: "4,500", "6", "23") that
+// `text` no longer has, found in code as a check on the model's fact check.
+function missingNumbers(orig, text) {
+    const nums = s => [...new Set(String(s || "").match(/\d+(?:[.,]\d+)*/g) || [])];
+    const have = new Set(nums(text));
+    return nums(orig).filter(n => !have.has(n));
+}
+
+// A fact-check "error" that is about style, not content (a metaphor, a saying, a
+// contrast, the tone): such points never reach the fix. A weaker promise ("guarantee"
+// -> "should") is content and stays.
+const STYLE_ONLY_RE = /\b(?:metaphors?|sayings?|idioms?|proverbs?|contrasts?|rhetorical|tone|register|phrasing|wording|stylistic|emphasis|emphatic|formal(?:ity)?|informal|nuance)\b/i;
+
+function isFactError(item) {
+    return !STYLE_ONLY_RE.test(String(item || "").split(/->|\u2192/).slice(1).join(" ") || String(item || ""));
+}
+
+// The errors in a fact check's reply, one per line, or [] when it found none.
+function factCheckErrors(reply) {
+    const t = stripThinking(reply).trim();
+    const bullet = /^(?:[-*\u2022]|\d+[.)])\s+(?=\S)/;
+    let items = t.split("\n").map(l => l.trim()).filter(l => bullet.test(l)).map(l => "- " + l.replace(bullet, ""));
+    // Only the arrow lines count when there are any, and a line that calls its point
+    // fine ("This is a reasonable summary") is never an error.
+    const arrows = items.filter(l => /->|\u2192/.test(l));
+    if (arrows.length) items = arrows;
+    items = items.filter(l => !/\b(?:not an error|no error|is (?:accurate|correct|fine|acceptable|ok)|valid paraphrase|reasonable (?:summary|paraphrase))\b/i.test(l));
+    if (items.length) return items.slice(0, 10);
+    // No list: "OK" (in any dress) means no errors, a sentence that isn't one is one error.
+    if (!t || /^[*_\s]*ok\b/i.test(t) || bullet.test(t)) return [];
+    return ["- " + t.replace(/\s+/g, " ").slice(0, 300)];
+}
+
+// Pass "fix": correct exactly the errors found. The original is there for its facts
+// only, and the prompt says so.
+function buildFactFixMessages(orig, text, lang, errors) {
+    return [
+        { role: "system", content: `An editor found errors in a rewritten text. Edit the rewritten text (the user message) to fix exactly these errors:\n${errors.join("\n")}\n\n`
+            + "Change only the words the errors are about: every other sentence stays word for word as it is in the rewritten text. "
+            + "An invented detail is removed; a missing fact is added back in a few plain words, in the rewrite's plain style. "
+            + "The text must still make sense as a whole: if a fix makes the next or previous sentence repeat or contradict it, adjust or drop that sentence. "
+            + "Never copy a sentence from the original: it is there so you can check facts, and its wording is what the rewrite replaced. "
+            + wholeWriteIn(lang) + ` Reply with the corrected text only.\n\nThe original, for checking facts only:\n${String(orig).trim()}` },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// A model commenting on the text instead of writing it ("though the text does not
+// specify which product, survey, or baseline this figure compares to", "Wir lassen hier
+// die Kosten weg").
+const META_COMMENT_RE = /\b(?:the (?:original|rewrite|rewritten text|source text)\b|the (?:text|passage|author) (?:does not|doesn't|did not|says|states|mentions|specifies|gives|provides)\b|(?:der|im|vom|dem) (?:Originaltext|Ausgangstext|Original)\b|der Text (?:nennt|sagt|gibt|erw\u00e4hnt|enth\u00e4lt) (?:nicht|keine?n?)\b|(?:lassen wir|lasse ich|wir lassen|ich lasse) [^.!?]{0,60}?(?:weg|au(?:ss|\u00df)en vor)\b|(?:we|I)(?:['\u2019]ll| will)? (?:leave|set|skip) [^.!?]{0,40}?(?:aside|out)\b)/i;
+
+// Is `reply` a usable result of a text-producing pass? `orig` is the text's body as it
+// came in, `prev` the text the pass was given. The rewrite may change everything but
+// must stay roughly as long as the original, in its language and form of address; a
+// later pass that was told to touch only a few spots must stay close to `prev`, and a
+// fix that went back to the original's wording is refused.
+function acceptWholeRewrite(orig, prev, reply, lang, pass) {
+    let t = stripThinking(reply);
+    const o = String(orig || "").trim(), p = String(prev || "").trim();
+    if (t.length > 1 && /^["'\u201c\u201e]/.test(t) && /["'\u201c\u201d]$/.test(t) && !/^["'\u201c\u201e]/.test(p)) t = t.slice(1, -1).trim();
+    if (!t) return { ok: false, reason: "empty reply" };
+    const lead = x => (x.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).slice(0, 3).join(" ");
+    if (PREAMBLE_RE.test(t) && !(PREAMBLE_RE.test(p) && lead(t) === lead(p))) return { ok: false, reason: "the model added an introduction" };
+    if (t.length / Math.max(1, o.length) < 0.3) return { ok: false, reason: "reply much shorter than the original" };
+    if (t.length / Math.max(1, o.length) > 1.8) return { ok: false, reason: "reply much longer than the original" };
+    const got = lang ? detectLanguage(t) : null;
+    if (got && got !== lang) return { ok: false, reason: `the model answered in ${LANGUAGE_NAMES[got]} instead of ${LANGUAGE_NAMES[lang]}` };
+    if (lang === "de") {
+        const was = addressForms(o), switched = [...addressForms(t)].filter(f => !was.has(f));
+        if (was.size && switched.length) return { ok: false, address: [...was][0], reason: `the model switched the form of address to "${switched[0]}"` };
+    }
+    const meta = t.match(META_COMMENT_RE);
+    if (meta && !META_COMMENT_RE.test(o)) return { ok: false, reason: `the model commented on the text ("${meta[0]}")` };
+    // Echoing the original back is no rewrite.
+    if (pass === "rewrite" && wordDiff(o, t).ratio < 0.3) return { ok: false, reason: "the model barely changed the text" };
+    if (pass !== "rewrite") {
+        const toPrev = wordDiff(p, t).ratio, toOrig = wordDiff(o, t).ratio;
+        if (toPrev === 0) return { ok: false, unchanged: true, reason: "the model changed nothing" };
+        // Closer to the original than to what it was given: back to the original, when it
+        // is clearly that or the edit is otherwise small; an unrelated reply is far off both.
+        if (toOrig < toPrev && (toOrig < 0.3 || toPrev <= 0.6)) return { ok: false, reason: "the model went back to the original wording" };
+        if (toPrev > 0.6) return { ok: false, reason: "the model rewrote far more than it was asked to" };
+        // Only the fact fix may shorten (an invented detail goes); the other passes keep
+        // the text's points.
+        const words = x => (x.match(/[\p{L}\p{N}]+/gu) || []).length;
+        if (pass !== "fix" && words(t) < 0.8 * words(p)) return { ok: false, reason: "the model cut part of the text" };
+        // A later pass may not lose a figure the text still had.
+        const lost = missingNumbers(p, t).filter(n => !missingNumbers(o, p).includes(n) && o.includes(n));
+        if (lost.length) return { ok: false, reason: `the model dropped the number ${lost[0]}` };
+    }
+    return { ok: true, text: t, change: wordDiff(o, t).ratio };
+}
+
+// Run the passes of WHOLE_PASSES on `text` (in language `lang`; `o` holds tone, extra
+// and details). `chat(passId, messages, maxTokens)` returns the model's reply. Only the
+// body of a letter goes to the model (splitLetterFrame). Each text reply is checked by
+// acceptWholeRewrite: a refused pass leaves the text as it was before it, a refused
+// rewrite gets one second try (and, when both copied the text, a draft written from
+// notes of it), and if that fails too `info.failed` says why and the body
+// comes back unchanged. If `chat` throws, the text of the passes that finished is kept:
+// `info.stopped` (an AbortError) or `info.error` says so. Returns the frame, the new
+// `body` and `info` for the report.
+async function wholeRewrite(text, lang, o, chat) {
+    o = o || {};
+    const info = { free: !!o.free, cut: [], passes: [], errors: [], remaining: [], missing: [], fixed: false, failed: null, stopped: false, error: null, letter: false, change: 0, before: 0, after: 0, spotsFound: 0, spotsLeft: 0, flagged: 0 };
+    const frame = splitLetterFrame(text);
+    const orig = frame.body;
+    info.letter = frame.letter;
+    info.before = info.after = orig.length;
+    if ((orig.match(/\p{L}/gu) || []).length < WHOLE_MIN_LETTERS) { info.failed = "the text is too short to rewrite as a whole"; return { frame, body: orig, info }; }
+    let cur = orig;
+    const notesTokens = 700, textTokens = Math.min(4096, 128 + Math.ceil(orig.length * 0.9));
+    const use = (id, reply) => {
+        // A letter's frame is put back afterwards: one the model wrote anyway goes.
+        if (frame.letter) reply = splitLetterFrame(stripThinking(String(reply || "")).trim()).body;
+        const v = acceptWholeRewrite(orig, cur, reply, lang, id);
+        if (v.ok) cur = v.text;
+        info.passes.push({ id, ok: v.ok, reason: v.ok ? "" : v.reason });
+        return v;
+    };
+    const bullets = t => (String(t).match(/^\s*(?:[-*\u2022]|\d+[.)])\s+\S/gm) || []).length;
+    try {
+        const critique = stripThinking(await chat("critique", buildCritiqueMessages(orig), notesTokens));
+        const plan = o.free ? stripThinking(await chat("plan", buildPlanMessages(orig, lang, critique, frame.letter), notesTokens)) : "";
+        const ro = { ...o, critique, plan, letter: frame.letter };
+        let v = use("rewrite", await chat("rewrite", buildWholeRewriteMessages(orig, lang, ro), textTokens));
+        if (!v.ok) {
+            const retry = v.address ? `Your first answer changed how the reader is addressed. The text says "${v.address}"; keep exactly that form.`
+                : /barely changed/.test(v.reason) ? "Your first answer copied most of the text word for word. Write every sentence anew, in your own words: copy no sentence of the text."
+                : `Your first answer was refused (${v.reason}). Avoid that this time.`;
+            info.passes.pop();
+            v = use("rewrite", await chat("retry", buildWholeRewriteMessages(orig, lang, { ...ro, retry }), textTokens));
+            if (!v.ok && /barely changed/.test(v.reason)) {
+                const outline = stripThinking(await chat("outline", buildOutlineMessages(orig, lang), textTokens)).trim();
+                info.passes.pop();
+                v = use("rewrite", await chat("draft", buildWholeRewriteMessages(outline || orig, lang, { ...ro, fromNotes: !!outline }), textTokens));
+            }
+            if (!v.ok) { info.failed = v.reason; return { frame, body: orig, info }; }
+        }
+        const review = stripThinking(await chat("review", buildSentenceReviewMessages(cur), notesTokens));
+        info.flagged = bullets(review);
+        if (info.flagged) use("sentences", await chat("sentences", buildSentenceFixMessages(cur, lang, review), textTokens));
+        // A number the free rewrite dropped went with its point.
+        info.errors = factCheckErrors(await chat("facts", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError)
+            .concat(o.free ? [] : missingNumbers(orig, cur).map(n => `- the number "${n}" of the original is missing -> put it back where it belongs`)).slice(0, 12);
+        if (info.errors.length) {
+            info.fixed = use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, info.errors), textTokens)).ok;
+            // What a second check finds goes to the report, not to another round of fixes.
+            if (info.fixed) info.remaining = factCheckErrors(await chat("recheck", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError);
+        }
+        const spots = wholeSpotNotes(cur, lang, orig);
+        info.spotsFound = spots.length;
+        if (spots.length) use("spots", await chat("spots", buildSpotFixMessages(cur, lang, spots), textTokens));
+        // One more round for the spots the model passed over.
+        let left = spots.length ? wholeSpotNotes(cur, lang, orig) : [];
+        if (left.length) {
+            use("spots", await chat("spots", buildSpotFixMessages(cur, lang, left), textTokens));
+            left = wholeSpotNotes(cur, lang, orig);
+        }
+        info.spotsLeft = left.length;
+        if (o.free || o.cutFiller) {
+            const c = cutFillerSentences(cur, await chat("slop", buildSlopFindMessages(cur, lang), notesTokens), lang);
+            if (c.cut.length) { cur = c.text; info.cut = c.cut; }
+        }
+        use("proof", await chat("proof", buildProofreadMessages(cur, lang), textTokens));
+        // Unchanged is the usual answer here, not a refusal.
+        const last = info.passes[info.passes.length - 1];
+        if (last.id === "proof" && last.reason === "the model changed nothing") info.passes.pop();
+        info.missing = missingNumbers(orig, cur);
+    } catch (e) {
+        if (e && e.name === "AbortError") info.stopped = true;
+        else info.error = e;
+    }
+    info.change = wordDiff(orig, cur).ratio;
+    info.after = cur.length;
+    return { frame, body: cur, info };
+}
+
+// The chat request body for one pass, as buildRewriteBody makes it for a passage.
+function buildChatBody(model, messages, temperature, noKwargs) {
+    const body = { model: model || "local-model", messages, temperature, stream: false };
+    if (!noKwargs) body.chat_template_kwargs = { enable_thinking: false };
+    return body;
 }
 
 // ========== Stage 3: typos ==========
@@ -1903,17 +2503,21 @@ if (typeof document !== "undefined") {
     // (a non-streamed call only checks the signal between polls), and shows the
     // speed after the status text.
     async function wllamaReword(passage, signal, lang, context, ropts) {
-        if (!wllamaInstance) throw new Error("No in-browser model is loaded: pick a .gguf file in ⚙️ Settings.");
         const body = buildRewriteBody("", passage, false, lang, context, ropts);
+        return wllamaChat(body.messages, body.temperature, wllamaMaxTokens(passage), signal);
+    }
+
+    async function wllamaChat(messages, temperature, maxTokens, signal) {
+        if (!wllamaInstance) throw new Error("No in-browser model is loaded: pick a .gguf file in ⚙️ Settings.");
         const base = $("status").textContent;
         const started = performance.now();
         let text = "", tokens = 0, shown = 0;
         try {
             await wllamaInstance.createChatCompletion({
-                messages: body.messages,
-                max_tokens: wllamaMaxTokens(passage),
-                temperature: body.temperature,
-                chat_template_kwargs: body.chat_template_kwargs,
+                messages,
+                max_tokens: maxTokens,
+                temperature,
+                chat_template_kwargs: { enable_thinking: false },
                 stream: true,
                 abortSignal: signal,
                 onData: chunk => {
@@ -1970,7 +2574,7 @@ if (typeof document !== "undefined") {
     function updateInputStats() {
         const n = input.value.length;
         $("inputStats").textContent = n ? `${n.toLocaleString()} characters` : "";
-        $("runBtn").disabled = !n || !!running;
+        $("runBtn").disabled = $("wholeBtn").disabled = $("freeBtn").disabled = !n || !!running;
     }
     input.addEventListener("input", updateInputStats);
 
@@ -2005,12 +2609,14 @@ if (typeof document !== "undefined") {
         level: () => $("optLevel").value,
         tone: () => $("optTone").value,
         extra: () => $("optExtra").value,
+        details: () => $("optDetails").value,
         minLetters: () => { const n = parseInt($("optMin").value, 10); return Number.isFinite(n) && n > 0 ? n : MIN_LETTERS; },
         rate: () => Number($("optRate").value) / 100,
         layout: () => $("optLayout").value,
     };
     function syncOptions() {
-        ["optShare", "optUnit", "optMin", "optLevel", "optTone", "optExtra"].forEach(id => { $(id).disabled = !opt.reword(); });
+        // Tone and Also serve Rewrite whole text too, so they stay usable.
+        ["optShare", "optUnit", "optMin", "optLevel"].forEach(id => { $(id).disabled = !opt.reword(); });
         $("optRate").disabled = $("optLayout").disabled = !opt.typos();
         $("rateValue").textContent = Number($("optRate").value).toFixed(1) + " %";
         $("rerollBtn").disabled = !last || !opt.typos() || !!running;
@@ -2029,6 +2635,19 @@ if (typeof document !== "undefined") {
         // @wllama:start
         if (backendMode === "wllama") return wllamaReword(passage, signal, lang, context, ropts);
         // @wllama:end
+        return apiChat(noKwargs => buildRewriteBody(MODEL_NAME, passage, noKwargs, lang, context, ropts), signal);
+    }
+
+    // One pass of Rewrite whole text. `maxTokens` bounds the reply in the browser only.
+    async function chatOnce(messages, temperature, maxTokens, signal) {
+        // @wllama:start
+        if (backendMode === "wllama") return wllamaChat(messages, temperature, maxTokens, signal);
+        // @wllama:end
+        return apiChat(noKwargs => buildChatBody(MODEL_NAME, messages, temperature, noKwargs), signal);
+    }
+
+    // POST the body `makeBody(noKwargs)` to the chat endpoint and return the reply text.
+    async function apiChat(makeBody, signal) {
         if (!MODEL_NAME) {
             // Ollama needs a real model name; llama.cpp takes any. Ask the server once.
             try {
@@ -2043,7 +2662,7 @@ if (typeof document !== "undefined") {
             const res = await fetch(apiEndpoint(API_URL, "/chat/completions"), {
                 method: "POST",
                 headers: authHeaders(),
-                body: JSON.stringify(buildRewriteBody(MODEL_NAME, passage, kwargsRejected, lang, context, ropts)),
+                body: JSON.stringify(makeBody(kwargsRejected)),
                 signal,
             });
             if (res.ok) {
@@ -2058,14 +2677,38 @@ if (typeof document !== "undefined") {
         throw new Error("The server refused the request.");
     }
 
+    // Rewrite whole text (wholeRewrite), with the status line, cleanup of the model's
+    // answer and the marks for the output pane.
+    async function rewriteWhole(text, marks, lang, signal, o) {
+        const r = await wholeRewrite(text, lang, o, (id, messages, maxTokens) => {
+            const k = WHOLE_PASSES.findIndex(p => p.id === id);
+            setStatus(`Rewriting the whole text, pass ${k + 1} of ${WHOLE_PASSES.length}: ${WHOLE_PASSES[k].label}…`, "busy");
+            return chatOnce(messages, WHOLE_PASSES[k].temperature, maxTokens, signal);
+        });
+        const info = r.info;
+        if (r.body === r.frame.body) return { text, marks, info };
+        const cleaned = o.clean ? cleanText(r.body) : { text: r.body, report: null };
+        const cur = cleaned.text.trim();
+        info.cleanReport = cleaned.report;
+        const diff = wordDiff(r.frame.body, cur);
+        info.change = diff.ratio;
+        info.after = cur.length;
+        const out = applyRewrites(text, marks, [{ start: r.frame.head.length, end: r.frame.head.length + r.frame.body.length, text: cur, changed: diff.changed }]);
+        return { ...out, info };
+    }
+
     // ----- pipeline -----
-    async function run() {
+    // `mode` "whole" runs Rewrite whole text in place of the Reword step, "free" the same
+    // with content changes allowed (Rewrite freely).
+    async function run(mode) {
         const source = input.value;
         if (!source) return;
-        if (!opt.clean() && !opt.reword() && !opt.typos()) { showToast("Switch on at least one step.", { error: true }); return; }
+        const whole = mode === "whole" || mode === "free";
+        if (!whole && !opt.clean() && !opt.reword() && !opt.typos()) { showToast("Switch on at least one step.", { error: true }); return; }
         running = new AbortController();
         const signal = running.signal;
         $("runBtn").hidden = true;
+        $("wholeBtn").disabled = $("freeBtn").disabled = true;
         $("stopBtn").hidden = false;
         $("rerollBtn").disabled = true;
         document.body.classList.add("is-running");
@@ -2080,7 +2723,14 @@ if (typeof document !== "undefined") {
                 const r = cleanText(text);
                 text = r.text; marks = r.marks; clean1 = r.report;
             }
-            if (opt.reword()) {
+            if (whole) {
+                const r = await rewriteWhole(text, marks, docLang, signal, { tone: opt.tone(), extra: opt.extra(), details: opt.details(), clean: opt.clean(), free: mode === "free" });
+                ({ text, marks } = r);
+                reword.whole = r.info;
+                if (r.info.cleanReport) clean2 = r.info.cleanReport;
+                reword.stopped = r.info.stopped;
+                reword.error = r.info.error;
+            } else if (opt.reword()) {
                 const units = rewordUnits(text, reword.unit, opt.minLetters());
                 const langOf = u => detectLanguage(u.context || u.text) || docLang;
                 // Those with stock phrases are reworded first.
@@ -2144,7 +2794,7 @@ if (typeof document !== "undefined") {
                 ({ text, marks } = applyRewrites(text, marks, reps));
                 reword.stockAfter = countStockPhrases(text, docLang);
             }
-            last = { text, marks, clean1, clean2, reword, lang: docLang, did: { clean: opt.clean(), reword: opt.reword() } };
+            last = { text, marks, clean1, clean2, reword, lang: docLang, did: { clean: opt.clean(), reword: !whole && opt.reword(), whole } };
             finish();
         } finally {
             running = null;
@@ -2172,7 +2822,9 @@ if (typeof document !== "undefined") {
         renderReport(typos);
         const { reword } = last;
         if (reword.error) setStatus("❌ " + errorText(reword.error), "error");
+        else if (reword.stopped && reword.whole) setStatus("Stopped — kept what the finished passes produced.", "warn");
         else if (reword.stopped) setStatus(`Stopped — reworded ${reword.done} of ${reword.attempted} ${reword.unit}s.`, "warn");
+        else if (reword.whole && reword.whole.failed) setStatus(`Not rewritten: ${reword.whole.failed}.`, "warn");
         else setStatus("Done.", "ok");
     }
 
@@ -2301,6 +2953,44 @@ if (typeof document !== "undefined") {
             if (fixed) add("p", `Cleaned ${fixed} character${fixed === 1 ? "" : "s"} out of the model's answers.`, "report-note");
             add("p", "Rewording changes the word choice, which is what statistical watermarks live in. No tool can promise what an AI detector will say.", "report-note");
         }
+        if (did.whole && reword.whole) {
+            const w = reword.whole;
+            const title = w.free ? "Rewrite freely" : "Rewrite whole text";
+            if (w.failed) add("h4", `${title}: not rewritten (${w.failed})`);
+            else {
+                add("h4", `${title}: ${Math.round(w.change * 100)} % of the words changed, ${w.before.toLocaleString()} → ${w.after.toLocaleString()} characters`);
+                if (w.letter) add("p", "The greeting and the sign-off were kept as they were.", "report-note");
+                const passText = { rewrite: "the rewrite", sentences: "fixing the flagged sentences", spots: "fixing contrasts and stock phrases", fix: "correcting the fact-check errors" };
+                if (w.flagged) add("p", `The sentence review flagged ${w.flagged} sentence${w.flagged === 1 ? "" : "s"}.`, "report-note");
+                if (w.cut && w.cut.length) add("p", `Cut ${w.cut.length} filler sentence${w.cut.length === 1 ? "" : "s"} that added no fact.`, "report-note");
+                if (w.spotsFound) add("p", `Set-up contrasts and stock phrases: ${w.spotsFound} found after the rewrite, ${w.spotsLeft} left.`, "report-note");
+                w.passes.filter(p => !p.ok).forEach(p => add("p", `Skipped ${passText[p.id] || p.id}: ${p.reason}.`, "report-note"));
+                const list = items => {
+                    const ul = add("ul", "", "report-list");
+                    items.forEach(e => { const li = document.createElement("li"); li.textContent = e.replace(/^-\s*/, ""); ul.appendChild(li); });
+                };
+                if (w.errors.length) {
+                    add("p", w.fixed ? "The fact check found these problems, and they were corrected:" : "⚠️ The fact check found these problems and they could not be corrected; fix them by hand:", w.fixed ? "report-note" : "report-warn");
+                    list(w.errors);
+                    // The second check is strict to a fault (it called "I think" a change of
+                    // register), so its points are offered, collapsed, not raised as warnings.
+                    if (w.remaining.length) {
+                        const det = add("details", "", "report-cat");
+                        const sum = document.createElement("summary");
+                        sum.textContent = `A second check raised ${w.remaining.length} more point${w.remaining.length === 1 ? "" : "s"}, often only wording: look ${w.remaining.length === 1 ? "it" : "them"} over`;
+                        det.appendChild(sum);
+                        const ul = document.createElement("ul");
+                        w.remaining.forEach(e => { const li = document.createElement("li"); li.textContent = e.replace(/^-\s*/, ""); ul.appendChild(li); });
+                        det.appendChild(ul);
+                    } else if (w.fixed) add("p", "A second check found nothing more.", "report-note");
+                } else if (!w.stopped && !w.error) add("p", "The fact check found no errors.", "report-note");
+                if (w.missing.length) add("p", w.free ? `These numbers of the original went with the points that were dropped: ${w.missing.join(", ")}. Check that none of them is missed.`
+                    : `⚠️ These numbers of the original are not in the result: ${w.missing.join(", ")}. Check the text.`, w.free ? "report-note" : "report-warn");
+            }
+            const fixed = cleanTotal(clean2);
+            if (fixed) add("p", `Cleaned ${fixed} character${fixed === 1 ? "" : "s"} out of the model's answer.`, "report-note");
+            add("p", (w.free ? "Read the result before you use it: this rewrite changes the content on purpose (points dropped or merged, examples added), and a model can still get a fact wrong." : "Read the result before you use it: the rewrite may reorder, merge or drop points, and a model can still get a fact wrong.") + " No tool can promise what an AI detector will say.", "report-note");
+        }
         if (opt.typos()) {
             add("h4", `Typos: ${typos.length} added (${last.layout.toUpperCase()} keyboard)`);
             const byKind = {};
@@ -2311,6 +3001,8 @@ if (typeof document !== "undefined") {
     }
 
     $("runBtn").addEventListener("click", () => { run().catch(e => setStatus("❌ " + errorText(e), "error")); });
+    $("wholeBtn").addEventListener("click", () => { run("whole").catch(e => setStatus("❌ " + errorText(e), "error")); });
+    $("freeBtn").addEventListener("click", () => { run("free").catch(e => setStatus("❌ " + errorText(e), "error")); });
     $("stopBtn").addEventListener("click", () => { if (running) running.abort(); });
     $("rerollBtn").addEventListener("click", () => { if (last && !running) finish(); });
     input.addEventListener("keydown", e => {
