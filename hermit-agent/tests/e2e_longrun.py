@@ -1,7 +1,7 @@
 """Phase 2a exit criterion: a 20+ step task survives an endpoint outage and a compaction,
 and passes in 4 of 5 runs, against a real model.
 
-    ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:8080/v1 [--runs 5]
+    ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1 [--runs 5]
 
 The task is a treasure hunt of 22 questions (hunt.py, uploaded as your file): each correct
 answer reveals the next question, so it takes at least one step per question. The app
@@ -343,7 +343,7 @@ def run_once(page, px, deadline_s):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://localhost:8080/v1")
+    ap.add_argument("--base-url", default="http://localhost:9931/v1")
     ap.add_argument("--model", default="")
     ap.add_argument("--effort", default="low")
     ap.add_argument("--runs", type=int, default=5)

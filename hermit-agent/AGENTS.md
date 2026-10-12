@@ -22,8 +22,8 @@ Open decisions waiting for review (the MVP build, Phases 2a, 2b, 3, 3.5 and 3.6)
 python3 build.py                                   # → dist/hermit-agent-standalone.html
 node tests/run.mjs                                 # unit tests (pure logic)
 ../benchmark/.venv/bin/python tests/e2e_agent.py   # e2e vs. a mock endpoint, Chromium + Firefox
-../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:8080/v1 --runs 3   # real model: success rate (--tool-mode native|text)
-../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:8080/v1           # real model: 20+ steps through outages
+../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 --runs 3   # real model: success rate (--tool-mode native|text)
+../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1           # real model: 20+ steps through outages
 ```
 **Real-model runs scale with the change.** The full suite (24 tasks × 3 runs, ~20 min
 per protocol) is for bigger changes: a phase, the agent loop, the system prompt's
@@ -91,7 +91,7 @@ See [tests/README.md](tests/README.md). The page's CSP blocks `eval`, so Playwri
 | Function / block | From (`../src/…`) | Source commit | Adapted how |
 |---|---|---|---|
 | `escapeHtml`, `gunzipToBytes`, `createThrottle`, `parseThinkSegments` | `script.js` | `28483fc` | unchanged |
-| `apiEndpoint`, `normalizeApiUrl`, `apiRoot`, `CLOUD_PROVIDERS`, `detectCloudProvider`, `isLocalEndpoint`, `describeRemoteEndpoint`, `isBlockedMixedContent` | `script.js` | `28483fc` | unchanged (example URL in the error text says :8080) |
+| `apiEndpoint`, `normalizeApiUrl`, `apiRoot`, `CLOUD_PROVIDERS`, `detectCloudProvider`, `isLocalEndpoint`, `describeRemoteEndpoint`, `isBlockedMixedContent` | `script.js` | `28483fc` | unchanged (example URL in the error text says :9931) |
 | `chatErrorHint` | `script.js` | `28483fc` | wllama branch dropped; context-overflow advice says "rewind"; its overflow regex moved into `isContextOverflowError` (shared with auto-compaction); agent wording via `retriedMs` (paused after retries) and `autoCompact` (overflow advice) |
 | `parseReasoningTemplateSupport`, `REASONING_PARAM_KEYS`, `looksLikeReasoningRejection` | `script.js` | `28483fc` | unchanged |
 | `buildReasoningParams` | `script.js` | `28483fc` | external-endpoint path only (no wllama kwargs path) |

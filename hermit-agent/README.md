@@ -2,7 +2,7 @@
 
 *A supervised, sandboxed, ephemeral agent that runs entirely in your browser.*
 
-> **Status: v0.3.6** (Phase 3.6, more file tools). One self-contained HTML file,
+> **Status: v0.3.7** (Phase 3.6, more file tools). One self-contained HTML file,
 > [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (≈ 11 MB,
 > Python included). It is developed here, separately from the main app in
 > [`../src/`](../src/), so it can move fast without destabilising HermitUI.
@@ -10,12 +10,12 @@
 ## Try it
 
 1. Start an OpenAI-compatible server that allows browser requests (CORS). For
-   example, llama.cpp: `llama-server -m model.gguf --jinja --port 8080`. Any
+   example, llama.cpp: `llama-server -m model.gguf --jinja --port 9931`. Any
    OpenAI-compatible cloud API works too, but then the task and what the agent
    prints go to that provider.
 2. Open `dist/hermit-agent-standalone.html`. Double-clicking the file is fine: no
    server is needed, and Python boots offline in about a second.
-3. Open ⚙️ Settings and set the API Base URL (default `http://localhost:8080/v1`),
+3. Open ⚙️ Settings and set the API Base URL (default `http://localhost:9931/v1`),
    the model and, if needed, the key. Use **Test Connection** to check them.
 4. Drop files into the workspace, describe the task, and press **Start**.
 

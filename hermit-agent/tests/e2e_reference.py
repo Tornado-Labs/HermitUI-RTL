@@ -2,7 +2,7 @@
 criterion): a real model works through a suite of tasks in the built app under
 risk-based supervision, several runs each, reported as one pass rate.
 
-    ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:8080/v1 [--runs 3]
+    ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 [--runs 3]
     ../benchmark/.venv/bin/python tests/e2e_reference.py --only "data processing,code + tests,calculation"   # Phase 1's three
     ../benchmark/.venv/bin/python tests/e2e_reference.py --tool-mode native   # Phase 3: native tool calls (also: text, auto)
     ../benchmark/.venv/bin/python tests/e2e_reference.py --quick --tool-mode native   # after a small change: 5 fast tasks, ~1 min
@@ -724,7 +724,7 @@ def run_task(page, task, deadline_s, tool_mode="auto"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://localhost:8080/v1")
+    ap.add_argument("--base-url", default="http://localhost:9931/v1")
     ap.add_argument("--model", default="")
     ap.add_argument("--browser", default="chromium")
     ap.add_argument("--effort", default="low")

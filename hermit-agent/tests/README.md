@@ -6,8 +6,8 @@ dependencies to install for the unit half.
 ```bash
 node tests/run.mjs                                              # unit tests (all *.test.mjs)
 python3 build.py && ../benchmark/.venv/bin/python tests/e2e_agent.py [chromium] [firefox] [firefox=/path/to/stock/firefox]
-../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:8080/v1 [--runs 3] [--tool-mode native|text]
-../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:8080/v1 [--runs 5]
+../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
+../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1 [--runs 5]
 ```
 
 `E2E_ONLY=outage,diff_edit …` runs only the named e2e scenarios (the names are in

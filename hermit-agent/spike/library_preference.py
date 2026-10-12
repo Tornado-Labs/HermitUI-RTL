@@ -6,7 +6,7 @@ Every import it attempts is recorded, from step code and from the .py files it w
 together with whether that module exists here. That shows what it reaches for first,
 and what it falls back to when that is missing.
 
-    ../benchmark/.venv/bin/python spike/library_preference.py --base-url http://localhost:8080/v1 --runs 2
+    ../benchmark/.venv/bin/python spike/library_preference.py --base-url http://localhost:9931/v1 --runs 2
 
 Uses tests/e2e_reference.py's task driver. Results: spike/out/library_preference.json.
 """
@@ -90,7 +90,7 @@ def imports_in(code):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://localhost:8080/v1")
+    ap.add_argument("--base-url", default="http://localhost:9931/v1")
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--app", default="", help="default: the committed build (no library hint)")
     ap.add_argument("--only", default="")

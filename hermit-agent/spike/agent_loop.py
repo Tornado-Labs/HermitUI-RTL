@@ -6,7 +6,7 @@ covers the three Phase 1 reference task types (data processing, code plus tests,
 calculation) and checks each result automatically. There is no supervision UI,
 gating or export; that is Phase 1 proper.
 
-    ../../benchmark/.venv/bin/python agent_loop.py --base-url http://localhost:8080/v1
+    ../../benchmark/.venv/bin/python agent_loop.py --base-url http://localhost:9931/v1
 
 Try your own task (the files are copied into /workspace; when it finishes the
 workspace is saved to out/<timestamp>/, and you can answer `ask:` questions and
@@ -349,7 +349,7 @@ def run_custom(page, args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base-url", default="http://localhost:8080/v1")
+    ap.add_argument("--base-url", default="http://localhost:9931/v1")
     ap.add_argument("--model", default="")
     ap.add_argument("--max-steps", type=int, default=10)
     ap.add_argument("--step-timeout", type=int, default=60, help="seconds per code step")

@@ -4,7 +4,7 @@
 sentences or paragraphs reworded by your own local model (or the whole text rewritten
 in several passes), and a few natural typos.*
 
-> **Status: v0.4.0.** One self-contained HTML file in two flavours:
+> **Status: v0.4.1.** One self-contained HTML file in two flavours:
 > [`dist/hermit-cleaner-standalone.html`](dist/hermit-cleaner-standalone.html) (≈ 380 KB)
 > rewords through a model server, and
 > [`dist/hermit-cleaner-wllama.html`](dist/hermit-cleaner-wllama.html) (≈ 3.6 MB) can also
@@ -287,11 +287,11 @@ graphics card, but not in Firefox yet (bug 1870699), where it is off by default.
 ## Try it
 
 1. For rewording, start an OpenAI-compatible server that allows browser requests
-   (CORS). For example, llama.cpp: `llama-server -m model.gguf --jinja --port 8080`.
+   (CORS). For example, llama.cpp: `llama-server -m model.gguf --jinja --port 9931`.
    Ollama works too. Cleanup and typos need no server. Or use the `-wllama` file and
    a model in the tab (above).
 2. Open `dist/hermit-cleaner-standalone.html`. Double-clicking the file is fine.
-3. Open ⚙️ Settings, check the API Base URL (default `http://localhost:8080/v1`) and
+3. Open ⚙️ Settings, check the API Base URL (default `http://localhost:9931/v1`) and
    use **Test Connection**. If you leave the model empty, the server's first model is
    used.
 4. Paste text (or drop a `.txt`/`.md` file), choose the steps, and press **Run**

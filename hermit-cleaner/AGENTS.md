@@ -166,7 +166,7 @@ poll with `page.evaluate` instead.
 ## Copied from HermitUI
 | Function / block | From (`../src/…`) | Source commit | Adapted how |
 |---|---|---|---|
-| `isLocalEndpoint`, `apiEndpoint`, `normalizeApiUrl`, `isBlockedMixedContent` | `script.js` | `7773cdd` | default URL in the error text says :8080; `isBlockedMixedContent` tolerates a missing `location` |
+| `isLocalEndpoint`, `apiEndpoint`, `normalizeApiUrl`, `isBlockedMixedContent` | `script.js` | `7773cdd` | default URL in the error text says :9931; `isBlockedMixedContent` tolerates a missing `location` |
 | `chatErrorHint` | `script.js` | `7773cdd` | wllama branch dropped; context advice talks about the paragraph |
 | `showToast`, toast and settings-modal CSS | `script.js`, `style.css` | `7773cdd` | unchanged apart from theme variables |
 | `tests/check.mjs`, `tests/run.mjs`, the `extract.mjs` approach | `../hermit-agent/tests/` | `7773cdd` | the extractor also slices multi-line `const` tables |

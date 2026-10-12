@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.6";
+const APP_VERSION = "0.3.7";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -188,7 +188,7 @@ function apiEndpoint(base, path) {
 // local hosts, https otherwise.
 function normalizeApiUrl(raw) {
     const url = String(raw || "").trim();
-    if (!url) throw new Error("Enter an API Base URL first, e.g. http://localhost:8080/v1.");
+    if (!url) throw new Error("Enter an API Base URL first, e.g. http://localhost:9931/v1.");
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(url)) return url;
     // Probed with a scheme attached: bare "localhost:1234" parses as scheme "localhost:".
     return (isLocalEndpoint("http://" + url) ? "http://" : "https://") + url;
@@ -3527,7 +3527,7 @@ function currentReasoningParams() {
 // Settings live in memory only (ephemerality rule); the API key is never exported and
 // never sent to the worker.
 const SETTINGS = {
-    apiUrl: "http://localhost:8080/v1", apiKey: "", model: "", instructions: "",
+    apiUrl: "http://localhost:9931/v1", apiKey: "", model: "", instructions: "",
     autonomy: "risk", stepLimit: 20, stepTimeoutSec: 60, maxTokens: 8192, effort: "low",
     // DESIGN §5.4: summarise older steps at this % of the context (0 = off), measured
     // against contextSize, or the server's n_ctx when that is 0.

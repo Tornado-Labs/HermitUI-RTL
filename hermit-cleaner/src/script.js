@@ -6,7 +6,7 @@
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.4.1";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -1960,7 +1960,7 @@ function apiEndpoint(base, path) {
 // A base URL typed without a scheme would be fetched relative to this page.
 function normalizeApiUrl(raw) {
     const url = String(raw || "").trim();
-    if (!url) throw new Error("Enter an API Base URL first, e.g. http://localhost:8080/v1.");
+    if (!url) throw new Error("Enter an API Base URL first, e.g. http://localhost:9931/v1.");
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(url)) return url;
     return (isLocalEndpoint("http://" + url) ? "http://" : "https://") + url;
 }
@@ -2052,7 +2052,7 @@ if (typeof document !== "undefined") {
     const $ = id => document.getElementById(id);
 
     // Settings: memory only (strict ephemerality).
-    let API_URL = "http://localhost:8080/v1";
+    let API_URL = "http://localhost:9931/v1";
     let MODEL_NAME = "";
     let API_KEY = "";
     let kwargsRejected = false;
