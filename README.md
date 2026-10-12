@@ -32,7 +32,10 @@
   <a href="https://moooff.github.io/HermitUI/hermit-agent/dist/hermit-agent-standalone.html">
     <img src="https://img.shields.io/badge/🤖_Try_HermitUI_Agent-1f6feb?style=for-the-badge" alt="Try HermitUI Agent" />
   </a>
-  <p><i>Left: connect it to your local AI server. Middle: one click downloads a small but capable model (Qwen3-0.6B, ~380 MB) and chats <b>fully inside your browser</b> — no server at all. Right: <a href="#-new-hermitui-agent-preview">the agent</a> — hand a task to your model and watch it solve it step by step in a Python sandbox.</i></p>
+  <a href="https://moooff.github.io/HermitUI/hermit-cleaner/dist/hermit-cleaner-standalone.html">
+    <img src="https://img.shields.io/badge/🧹_Try_HermitUI_Cleaner-d97706?style=for-the-badge" alt="Try HermitUI Cleaner" />
+  </a>
+  <p><i>First: connect it to your local AI server. Second: one click downloads a small but capable model (Qwen3-0.6B, ~380 MB) and chats <b>fully inside your browser</b> — no server at all. Then <a href="#-new-hermitui-agent-preview">the agent</a> — hand a task to your model and watch it solve it step by step in a Python sandbox — and <a href="hermit-cleaner/">the cleaner</a>, which strips hidden characters and AI typography from text.</i></p>
 </div>
 
 HermitUI is a chat interface that is **one `.html` file**. No install, no server, no build step, no npm — double-click it and it opens.
