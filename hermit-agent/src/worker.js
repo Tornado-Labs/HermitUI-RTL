@@ -7,14 +7,17 @@
 // its own body.
 //
 // Protocol: the main thread sends { id, op, ... }; the worker answers { id, ok, result }
-// or { id, ok: false, error }. Agent code can reach this worker's JS globals through
-// Pyodide's `js` module and could post forged answers, so the main thread validates
-// every message and never evaluates anything it receives (DESIGN §4.1).
+// or { id, ok: false, error }; while a run op works, it also posts { id, live } with the
+// output written so far, which the main thread only ever shows as text. Agent code can
+// reach this worker's JS globals through Pyodide's `js` module and could post forged
+// answers, so the main thread validates every message and never evaluates anything it
+// receives (DESIGN §4.1).
 function hermitWorkerMain() {
     "use strict";
     const VIRT = "https://pyodide.invalid/";
     const OUTPUT_HEAD_BYTES = 1 << 20;     // keep the first 1 MB of a step's output…
     const OUTPUT_TAIL_BYTES = 64 << 10;    // …and the last 64 KB
+    const LIVE_BURST = 20;                 // live output messages per 100 ms (liveOutput)
     let py = null;
     let ns = null;          // the agent's persistent namespace (notebook-like)
     let harness = null;     // the harness's own namespace, out of the agent's sight
@@ -299,12 +302,32 @@ def hermit_clear_workspace():
         return i > 0 ? ["Traceback (most recent call last):", ...lines.slice(i)].join("\n") : String(msg).trim();
     }
 
-    function outputCollector() {
+    // Output as it is written, posted to the main thread for the running step's card
+    // ({ id, live }). At most LIVE_BURST messages per 100 ms: what a chattier step writes
+    // beyond that goes out with its next write, and the result holds all of it anyway.
+    function liveOutput(id) {
+        let pending = "", windowStart = 0, sent = 0;
+        return (s) => {
+            pending += s;
+            const now = performance.now();
+            if (now - windowStart >= 100) { windowStart = now; sent = 0; }
+            if (sent >= LIVE_BURST) {
+                if (pending.length > OUTPUT_TAIL_BYTES) pending = "\n[…]\n" + pending.slice(-OUTPUT_TAIL_BYTES);
+                return;
+            }
+            sent++;
+            self.postMessage({ id, live: pending });
+            pending = "";
+        };
+    }
+
+    function outputCollector(onText) {
         const head = [];
         let headBytes = 0, dropped = 0, tail = "";
         const decoders = { out: new TextDecoder(), err: new TextDecoder() };
         const push = (s) => {
             if (!s) return;
+            if (onText) onText(s);
             if (headBytes < OUTPUT_HEAD_BYTES) {
                 const room = OUTPUT_HEAD_BYTES - headBytes;
                 head.push(s.slice(0, room));
@@ -458,11 +481,11 @@ def hermit_clear_workspace():
         return { loaded, installed: done, failed, errors, netAttempts: netAttempts.slice(), ms: Math.round(performance.now() - t0) };
     }
 
-    async function run({ code, allowNetwork, step }) {
+    async function run({ id, code, allowNetwork, step }) {
         const t0 = performance.now();
         const notes = [];
         netAttempts = [];
-        const out = outputCollector();
+        const out = outputCollector(liveOutput(id));
         py.setStdout({ write: out.write("out") });
         py.setStderr({ write: out.write("err") });
         let status = "ok";

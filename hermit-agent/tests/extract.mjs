@@ -57,7 +57,7 @@ const FUNCS = [
     "packageImportNames", "importPackageIndex", "normalizePackageName", "bundledImportIndex", "bundledAliases", "planBundledLoad", "packageLoadNote", "packageFailureMessage", "moduleNotFoundHint", "referencedPythonFiles", "rewritePyodideInstallAdvice", "readEntry",
     "describeBinary", "zipCentralDirectory", "binarySummary", "binaryFileNotes", "periodicFileListing", "fileListingKey",
     "awaitsModel", "copyMessage", "agentToolDefs", "resolveProtocol", "toolSupportFromProps", "toolSupportFromOllamaShow", "findListedModel",
-    "toolSupportFromModelList", "looksLikeToolRejection", "fallbackToolCallId", "toolCallToFileAction", "cleanAskOptions", "splitAskOptions", "parseToolCalls", "toolCallAsText",
+    "toolSupportFromModelList", "looksLikeToolRejection", "fallbackToolCallId", "toolCallToFileAction", "cleanAskOptions", "splitAskOptions", "parseToolCalls", "toolCallAsText", "parsePartialJson",
     "messageAsText", "toolHistoryAsText", "fileCallResults", "noActionAdvice", "strayTagNote",
 ];
 

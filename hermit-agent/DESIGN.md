@@ -50,7 +50,9 @@ This is the core of the product. Everything else serves it.
      (`parseThinkSegments`).
   2. **Proposed code:** syntax-highlighted Python, editable while the step is pending.
   3. **Output:** stdout and stderr. Tracebacks are trimmed for display, with the full
-     text on expand. Generated images (matplotlib figures) appear inline. *As built
+     text on expand. *As built:* while the step runs, what it prints so far shows in the
+     card (the worker posts it as it is written, §4.2), then the final output replaces
+     it. Generated images (matplotlib figures) appear inline. *As built
      (Phase 2b):* every image file a step created or changed (by extension: PNG, JPEG,
      GIF, WebP, BMP, SVG) is shown on its card while its version is held, captured
      figures first, at most 8, scaled down to fit but never up; a click opens the
@@ -370,7 +372,11 @@ below.
   `/workspace` from `sys.modules`, so an edited module is re-read (spike finding).
   `input()` raises instead of hanging, and `MPLBACKEND` selects the harness's inline
   backend (§8, matplotlib). Output is capped
-  at the first 1 MB plus the last 64 KB per step. The main thread re-hashes every
+  at the first 1 MB plus the last 64 KB per step. While a step runs, its output is
+  also posted as it is written (`{ id, live }`, at most 20 messages per 100 ms; Pyodide's
+  stdout is line-buffered, so each `print` arrives at once). The main thread shows it as
+  text in the running card and keeps nothing of it: the result's output replaces it, and a
+  forged live message can do no more than a `print`. The main thread re-hashes every
   changed file it receives and refuses a result whose bytes don't match the
   worker's listing. A forged result can therefore only *hide* changes, which never
   reach the canonical workspace, so the next re-seed discards them.
@@ -807,7 +813,11 @@ already emits the shape a tool call will produce, `{ tool, args }`, which
   setting mid-session works on the same history.
 - **Same executor, gating, timeline and export:** a native step runs through
   `executeStep` / `executeFileStep` like any other and gets a 🔧 badge; while it streams,
-  the card says which tool is being called. Session format 2 adds `tool_calls`, `tool`
+  the card shows each call as the model writes it (`parsePartialJson` reads the JSON
+  arguments cut off anywhere): the code or file content growing line by line with a
+  caret and a line count, an edit's old and new text, the path, question or answer.
+  It is a preview only, as text (an answer through `renderMarkdown`); what runs comes
+  from the finished arguments, and none of it is kept in the session. Session format 2 adds `tool_calls`, `tool`
   messages, `protocol` (session and step) and `skippedCalls`; format 1 still imports.
 
 ---

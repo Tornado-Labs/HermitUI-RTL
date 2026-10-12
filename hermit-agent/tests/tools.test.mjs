@@ -236,4 +236,28 @@ section("8. Session schema (format 2)");
     check("format version is 2", X.SESSION_FORMAT_VERSION === 2);
 }
 
+section("9. parsePartialJson — tool-call arguments while they stream");
+{
+    const P = X.parsePartialJson;
+    const full = JSON.stringify({ path: "src/app.py", content: "import os\nprint(\"hi\")\té 😀\n", n: 12, ok: true, edits: [{ old_text: "a", new_text: "b" }, { old_text: "c\\d", new_text: "" }] });
+    let monotone = true, prev = "", ok = true;
+    for (let k = 0; k <= full.length; k++) {
+        const v = P(full.slice(0, k));
+        const c = v && typeof v.content === "string" ? v.content : "";
+        if (!c.startsWith(prev.slice(0, Math.max(0, prev.length - 1)))) monotone = false;   // a cut \u escape may drop one unit
+        prev = c;
+        if (k > 0 && (v === null || typeof v !== "object")) ok = false;
+    }
+    check("every prefix reads as an object", ok);
+    check("the content only grows as the JSON streams in", monotone);
+    check("the whole JSON reads exactly", JSON.stringify(P(full)) === full);
+    check("an unterminated string keeps its text so far", P('{"path": "a.py", "code": "for i in range(3):\\n    pri').code === "for i in range(3):\n    pri");
+    check("…a key without its value yet is left out", JSON.stringify(P('{"path": "a.py", "code"')) === '{"path":"a.py"}' && JSON.stringify(P('{"path": "a.py", "co')) === '{"path":"a.py"}');
+    check("…an escape cut in half is left out", P('{"code": "x\\').code === "x" && P('{"code": "x\\u00').code === "x" && P('{"code": "x\\u00e9').code === "xé");
+    check("…an array of edits keeps its finished members and the one in progress", JSON.stringify(P('{"edits": [{"old_text": "a", "new_text": "b"}, {"old_text": "c", "new_')) === '{"edits":[{"old_text":"a","new_text":"b"},{"old_text":"c"}]}');
+    check("a literal cut short is left out", JSON.stringify(P('{"ignore_case": tr')) === "{}" && P('{"start_line": 12, "end_line": 3').start_line === 12);
+    check("nothing yet → undefined; not JSON → undefined", P("") === undefined && P("  ") === undefined && P("hello") === undefined);
+    check("garbage after a value stops reading, keeping what was read", P('{"code": "x", oops}').code === "x");
+}
+
 report();

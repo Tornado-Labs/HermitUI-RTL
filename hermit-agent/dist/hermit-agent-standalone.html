@@ -2130,6 +2130,23 @@ pre.diff { font-size: 0.8rem; line-height: 1.45; overflow: auto; max-height: 60v
 .edit-old { border-left: 3px solid var(--danger); background: var(--danger-bg); }
 .edit-new { border-left: 3px solid var(--ok); background: var(--ok-bg); }
 .file-result pre.output { margin-top: 6px; }
+
+/* A tool call while the model writes it, and a running step's output: both grow live. */
+.tool-previews { display: flex; flex-direction: column; gap: 10px; font-size: 0.86rem; }
+.tool-preview { display: flex; flex-direction: column; gap: 6px; }
+pre.tool-preview-body { max-height: 360px; overflow: auto; margin: 0; }
+div.tool-preview-body .edit-pair:first-child { margin-top: 0; }
+.stream-caret {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.1em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: var(--primary);
+    animation: caretBlink 1s steps(1) infinite;
+}
+@keyframes caretBlink { 50% { opacity: 0; } }
+pre.live-output { border-color: var(--primary); }
 .step-notes { font-size: 0.82rem; color: var(--text-muted); padding-left: 1.2em; white-space: pre-wrap; word-break: break-word; }
 .hint { font-size: 0.82rem; color: var(--text-muted); }
 
@@ -2393,7 +2410,7 @@ pre.diff { font-size: 0.8rem; line-height: 1.45; overflow: auto; max-height: 60v
     </div>
     <header class="app-header">
         <div class="brand">
-            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.7</span></h1>
+            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.8</span></h1>
             <span class="model-badge" id="modelBadge">🤖 model</span>
             <span class="local-badge" id="localBadge" hidden>🏠 local</span>
             <span class="protocol-badge" id="protocolBadge">🔧 auto</span>
@@ -2580,14 +2597,17 @@ pre.diff { font-size: 0.8rem; line-height: 1.45; overflow: auto; max-height: 60v
 // its own body.
 //
 // Protocol: the main thread sends { id, op, ... }; the worker answers { id, ok, result }
-// or { id, ok: false, error }. Agent code can reach this worker's JS globals through
-// Pyodide's `js` module and could post forged answers, so the main thread validates
-// every message and never evaluates anything it receives (DESIGN §4.1).
+// or { id, ok: false, error }; while a run op works, it also posts { id, live } with the
+// output written so far, which the main thread only ever shows as text. Agent code can
+// reach this worker's JS globals through Pyodide's `js` module and could post forged
+// answers, so the main thread validates every message and never evaluates anything it
+// receives (DESIGN §4.1).
 function hermitWorkerMain() {
     "use strict";
     const VIRT = "https://pyodide.invalid/";
     const OUTPUT_HEAD_BYTES = 1 << 20;     // keep the first 1 MB of a step's output…
     const OUTPUT_TAIL_BYTES = 64 << 10;    // …and the last 64 KB
+    const LIVE_BURST = 20;                 // live output messages per 100 ms (liveOutput)
     let py = null;
     let ns = null;          // the agent's persistent namespace (notebook-like)
     let harness = null;     // the harness's own namespace, out of the agent's sight
@@ -2872,12 +2892,32 @@ def hermit_clear_workspace():
         return i > 0 ? ["Traceback (most recent call last):", ...lines.slice(i)].join("\n") : String(msg).trim();
     }
 
-    function outputCollector() {
+    // Output as it is written, posted to the main thread for the running step's card
+    // ({ id, live }). At most LIVE_BURST messages per 100 ms: what a chattier step writes
+    // beyond that goes out with its next write, and the result holds all of it anyway.
+    function liveOutput(id) {
+        let pending = "", windowStart = 0, sent = 0;
+        return (s) => {
+            pending += s;
+            const now = performance.now();
+            if (now - windowStart >= 100) { windowStart = now; sent = 0; }
+            if (sent >= LIVE_BURST) {
+                if (pending.length > OUTPUT_TAIL_BYTES) pending = "\n[…]\n" + pending.slice(-OUTPUT_TAIL_BYTES);
+                return;
+            }
+            sent++;
+            self.postMessage({ id, live: pending });
+            pending = "";
+        };
+    }
+
+    function outputCollector(onText) {
         const head = [];
         let headBytes = 0, dropped = 0, tail = "";
         const decoders = { out: new TextDecoder(), err: new TextDecoder() };
         const push = (s) => {
             if (!s) return;
+            if (onText) onText(s);
             if (headBytes < OUTPUT_HEAD_BYTES) {
                 const room = OUTPUT_HEAD_BYTES - headBytes;
                 head.push(s.slice(0, room));
@@ -3031,11 +3071,11 @@ def hermit_clear_workspace():
         return { loaded, installed: done, failed, errors, netAttempts: netAttempts.slice(), ms: Math.round(performance.now() - t0) };
     }
 
-    async function run({ code, allowNetwork, step }) {
+    async function run({ id, code, allowNetwork, step }) {
         const t0 = performance.now();
         const notes = [];
         netAttempts = [];
-        const out = outputCollector();
+        const out = outputCollector(liveOutput(id));
         py.setStdout({ write: out.write("out") });
         py.setStderr({ write: out.write("err") });
         let status = "ok";
@@ -3111,7 +3151,7 @@ def hermit_clear_workspace():
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.7";
+const APP_VERSION = "0.3.8";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -3995,6 +4035,76 @@ function toolCallAsText(call) {
         case "ask_user": return "ask: " + s(a.question) + cleanAskOptions(a.options).map(o => "\n- " + o).join("");
         default: return `[call to ${String(f.name || "?")}: ${String(f.arguments || "").slice(0, 2000)}]`;
     }
+}
+
+// A tool call's arguments while they stream in: JSON cut off anywhere. Reads what has
+// arrived: an unterminated string keeps its text so far (an escape cut in half is left
+// out), an unfinished object or array keeps the members read, and a key whose value hasn't
+// started is skipped. Stops at anything that isn't JSON. Returns undefined when nothing
+// could be read. Only for the live preview; the step itself parses the finished JSON.
+function parsePartialJson(text) {
+    const s = String(text || "");
+    const OPEN = "\x7b", CLOSE = "\x7d";
+    const ESC = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
+    const PLAIN = /[^"\\]+/y, LITERAL = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y;
+    let i = 0;
+    const ws = () => { while (i < s.length && " \t\n\r".includes(s[i])) i++; };
+    const str = () => {
+        let out = "";
+        for (i++; i < s.length;) {
+            PLAIN.lastIndex = i;
+            const m = PLAIN.exec(s);
+            if (m) { out += m[0]; i += m[0].length; continue; }
+            if (s[i] === '"') { i++; return { v: out, done: true }; }
+            const e = s[i + 1];
+            if (e === undefined) break;
+            if (e === "u") {
+                const hex = s.slice(i + 2, i + 6);
+                if (!/^[0-9a-fA-F]{4}$/.test(hex)) break;
+                out += String.fromCharCode(parseInt(hex, 16));
+                i += 6;
+            } else {
+                out += e in ESC ? ESC[e] : e;
+                i += 2;
+            }
+        }
+        return { v: out, done: false };
+    };
+    const value = () => {
+        ws();
+        if (i >= s.length) return null;
+        const c = s[i];
+        if (c === '"') return str();
+        if (c === OPEN || c === "[") {
+            const obj = c === OPEN, out = obj ? {} : [];
+            for (i++; ;) {
+                ws();
+                if (i >= s.length) return { v: out, done: false };
+                if (s[i] === (obj ? CLOSE : "]")) { i++; return { v: out, done: true }; }
+                if (s[i] === ",") { i++; continue; }
+                let key = null;
+                if (obj) {
+                    if (s[i] !== '"') return { v: out, done: false };
+                    const k = str();
+                    ws();
+                    if (!k.done || s[i] !== ":") return { v: out, done: false };
+                    i++;
+                    key = k.v;
+                }
+                const v = value();
+                if (!v) return { v: out, done: false };
+                if (obj) out[key] = v.v; else out.push(v.v);
+                if (!v.done) return { v: out, done: false };
+            }
+        }
+        LITERAL.lastIndex = i;
+        const m = LITERAL.exec(s);
+        if (!m) return null;
+        i += m[0].length;
+        return { v: JSON.parse(m[0]), done: i < s.length };
+    };
+    const r = value();
+    return r ? r.v : undefined;
 }
 
 // A message's text with its tool calls written out (toolCallAsText).
@@ -6051,7 +6161,14 @@ function startWorker() {
         if (gen !== PY.gen) return;
         const d = e.data;
         // Untrusted: agent code can post from inside the worker. Only well-formed
-        // answers to a pending request are accepted; everything else is dropped.
+        // answers to a pending request are accepted; everything else is dropped. Live
+        // output is text for the running step's card (as forgeable as a print, and
+        // replaced by the result's output when the step ends).
+        if (d && typeof d === "object" && Number.isInteger(d.id) && typeof d.live === "string") {
+            const p = PY.pending.get(d.id);
+            if (p && p.onLive) p.onLive(d.live.slice(0, 1 << 20));
+            return;
+        }
         if (!d || typeof d !== "object" || !Number.isInteger(d.id) || typeof d.ok !== "boolean") return;
         const p = PY.pending.get(d.id);
         if (!p) return;
@@ -6066,7 +6183,8 @@ function startWorker() {
     return w;
 }
 
-function workerCall(op, payload, timeoutMs) {
+// onLive(text): the output a run op writes, as it comes.
+function workerCall(op, payload, timeoutMs, onLive) {
     const w = PY.worker;
     if (!w) return Promise.reject(new Error("interpreter not running"));
     const id = ++PY.seq;
@@ -6074,7 +6192,7 @@ function workerCall(op, payload, timeoutMs) {
         const timer = timeoutMs ? setTimeout(() => {
             if (PY.pending.delete(id)) reject(new Error("timeout"));
         }, timeoutMs) : null;
-        PY.pending.set(id, { resolve, reject, timer });
+        PY.pending.set(id, { resolve, reject, timer, onLive });
         w.postMessage({ id, op, ...payload });
     });
 }
@@ -6252,7 +6370,7 @@ async function runInWorker(code, opts) {
             if (typeof setActivity === "function" && RUN.active) setActivity("python");
         }
         phase = "run";
-        const r = validateRunResult(await workerCall("run", { code, allowNetwork: !!o.allowNetwork, step: o.step }, o.timeoutMs));
+        const r = validateRunResult(await workerCall("run", { code, allowNetwork: !!o.allowNetwork, step: o.step }, o.timeoutMs, o.onOutput));
         r.output = rewritePyodideInstallAdvice(r.output);
         r.notes = [...pkgNotes, ...r.notes];
         r.netAttempts = [...pkgAttempts, ...r.netAttempts];
@@ -7143,7 +7261,7 @@ async function agentTurn() {
         setRequesting(true);
         result = await requestWithRetry((signal) => {
             // A retry starts the reply over: what streamed before the drop is discarded.
-            rawContent = ""; apiReasoning = ""; step._calling = "";
+            rawContent = ""; apiReasoning = ""; step._calling = ""; step._calls = [];
             setActivity("thinking");
             return streamChat(payload, signal, (r, c, calls) => {
                 apiReasoning += r;
@@ -7155,11 +7273,14 @@ async function agentTurn() {
                 step.reasoning = [apiReasoning, split.reasoning].filter(Boolean).join("\n\n");
                 step.content = split.text;
                 step._calling = calling;
+                // The calls' arguments so far, for the live preview (the strings are shared,
+                // not copied).
+                step._calls = (calls || []).map(t => ({ name: t.name, arguments: t.arguments }));
                 render(() => renderTimelineItem(idx));
             });
         }, (e, attempt, delay) => {
             render.cancel();
-            step.reasoning = ""; step.content = ""; step._calling = "";
+            step.reasoning = ""; step.content = ""; step._calling = ""; step._calls = [];
             step._retry = { n: attempt, error: String(e.message || e) };
             step._retries = attempt;
             setActivity("retrying");
@@ -7203,7 +7324,7 @@ async function agentTurn() {
         setRequesting(false);
     }
     render.cancel();
-    step._calling = "";
+    step._calling = ""; step._calls = null;
     if (step._retries) {
         const secs = Math.round((Date.now() - t0 - (result.clock.endMs - result.clock.startMs)) / 1000);
         step.retryNote = `🔌 The endpoint answered again after ${step._retries} retr${step._retries === 1 ? "y" : "ies"} (about ${secs} s without a reply).`;
@@ -7449,7 +7570,17 @@ async function executeStep(step, idx, notes) {
         debugLog("tool", `python · ${code.split("\n").length} lines${allowNetwork ? " · network allowed" : ""}`, code);
         const t0 = performance.now();
         renderTimelineItem(idx);
-        const r = await runInWorker(code, { allowNetwork, timeoutMs: SETTINGS.stepTimeoutSec * 1000, step: step.n });
+        // What the code prints shows in the card while it runs; the tail only, past 64 KB.
+        step._live = "";
+        const live = createThrottle(THROTTLE_MS);
+        const onOutput = (text) => {
+            step._live += text;
+            if (step._live.length > 98304) step._live = "[… earlier output not shown here …]\n" + step._live.slice(-65536);
+            live(() => renderTimelineItem(idx));
+        };
+        const r = await runInWorker(code, { allowNetwork, timeoutMs: SETTINGS.stepTimeoutSec * 1000, step: step.n, onOutput });
+        live.cancel();
+        step._live = null;
         step.notes = [...notes, ...(r.notes || [])];
         step.netAttempts = r.netAttempts || [];
         debugLog(r.status === "ok" ? "result" : "error", `python → ${r.status} · ${Math.round(performance.now() - t0)} ms` + (step.netAttempts.length ? ` · ${step.netAttempts.length} blocked network attempt(s)` : ""), clipForDebug(r.output, 4000) + (step.netAttempts.length ? "\n\nBlocked: " + step.netAttempts.join(", ") : ""));
@@ -7886,6 +8017,83 @@ function renderFileActions(actions) {
     return ul;
 }
 
+const TOOL_PREVIEW_ICONS = { ...FILE_ACTION_ICONS, run_python: "🐍", ask_user: "❓", finish: "✅" };
+const TOOL_PREVIEW_VERBS = { ...FILE_ACTION_VERBS, run_python: "run Python", ask_user: "ask", finish: "finish" };
+
+// A native tool call while the model is still writing it: its arguments so far, read
+// from the partial JSON, so the code or file can be watched taking shape line by line.
+// All of it as text; the answer of finish goes through renderMarkdown.
+function renderToolPreview(call) {
+    const a = parsePartialJson(call.arguments);
+    const args = a && typeof a === "object" && !Array.isArray(a) ? a : {};
+    const s = (v) => (typeof v === "string" ? v : "");
+    const box = el("div", "tool-preview");
+    box.dataset.len = String(String(call.arguments || "").length);
+    const head = box.appendChild(el("div", "file-action"));
+    head.appendChild(el("span", "file-action-icon", TOOL_PREVIEW_ICONS[call.name] || "🔧"));
+    head.appendChild(el("span", "file-action-verb", TOOL_PREVIEW_VERBS[call.name] || call.name || "…"));
+    if (call.name === "search_files" && s(args.pattern)) head.appendChild(el("code", "file-action-query", args.pattern));
+    if (s(args.path)) head.appendChild(el("code", "file-action-path", args.path));
+    if (call.name === "move_file" && s(args.new_path)) { head.appendChild(el("span", "file-action-arrow", "→")); head.appendChild(el("code", "file-action-path", args.new_path)); }
+    const meta = [];
+    if (call.name === "search_files" && s(args.glob)) meta.push("in " + args.glob);
+    if (call.name === "read_file" && Number.isInteger(args.start_line)) meta.push(`from line ${args.start_line}` + (Number.isInteger(args.end_line) ? ` to ${args.end_line}` : ""));
+    let body = null;
+    const text = call.name === "run_python" ? s(args.code) : call.name === "write_file" ? s(args.content) : null;
+    if (text !== null) {
+        const lines = text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
+        meta.push(`${lines} line${lines === 1 ? "" : "s"} so far`);
+        const ext = s(args.path).split(".").pop().toLowerCase();
+        body = highlightedCode(text, call.name === "run_python" ? "python" : HL_LANGS[ext] || "plaintext");
+        body.firstChild.appendChild(el("span", "stream-caret"));
+    } else if (call.name === "edit_file") {
+        const edits = (Array.isArray(args.edits) ? args.edits : []).filter(e => e && typeof e === "object");
+        if (edits.length) meta.push(`${edits.length} change${edits.length === 1 ? "" : "s"} so far`);
+        body = el("div");
+        for (const e of edits) {
+            const pair = body.appendChild(el("div", "edit-pair"));
+            pair.appendChild(el("pre", "edit-old", s(e.old_text)));
+            if ("new_text" in e) pair.appendChild(el("pre", "edit-new", s(e.new_text) || "(deleted)"));
+        }
+    } else if (call.name === "ask_user" && s(args.question)) {
+        body = el("p", "task-text", args.question);
+    } else if (call.name === "finish" && s(args.answer)) {
+        body = renderMarkdown(args.answer);
+    }
+    if (meta.length) head.appendChild(el("span", "file-action-msg", meta.join(" · ")));
+    if (body) { body.classList.add("tool-preview-body"); box.appendChild(body); }
+    return box;
+}
+
+function renderToolPreviews(calls) {
+    const box = el("div", "tool-previews");
+    for (const c of calls) box.appendChild(renderToolPreview(c));
+    return box;
+}
+
+// Scroll boxes that grow while you watch (a streaming tool call, live output) follow
+// the newest line, unless you scrolled up to read.
+function followScroll(oldBoxes, newBoxes) {
+    newBoxes.forEach((b, k) => {
+        const o = oldBoxes[k];
+        b.scrollTop = !o || o.scrollHeight - o.scrollTop - o.clientHeight < 24 ? b.scrollHeight : o.scrollTop;
+    });
+}
+
+// Updates the previews of a streaming card in place; only calls whose arguments grew are
+// rebuilt.
+function patchToolPreviews(box, calls) {
+    calls.forEach((c, i) => {
+        const old = box.children[i];
+        if (old && old.dataset.len === String(String(c.arguments || "").length)) return;
+        const fresh = renderToolPreview(c);
+        if (!old) { box.appendChild(fresh); return; }
+        const before = [...old.querySelectorAll("pre")].map(p => ({ scrollTop: p.scrollTop, scrollHeight: p.scrollHeight, clientHeight: p.clientHeight }));
+        old.replaceWith(fresh);
+        followScroll(before, [...fresh.querySelectorAll("pre")]);
+    });
+}
+
 // "+3 −1" for a modified text file whose two versions are still held, else "". Cached:
 // cards re-render often and the versions never change.
 const DIFF_STAT_CACHE = new Map();
@@ -8041,7 +8249,7 @@ function buildStepCard(item, idx, old) {
     if (item.phase === "thinking") {
         if (item._retry) card.appendChild(el("p", "hint retry-hint", `🔌 No answer from the endpoint (${item._retry.error}). Retrying automatically (attempt ${item._retry.n}); the status bar counts down, and Stop ends the wait.`));
         if (item.content) card.appendChild(renderMarkdown(item.content));
-        if (item._calling) card.appendChild(el("p", "hint calling-hint", `🔧 calling ${item._calling}…`));
+        if ((item._calls || []).length) card.appendChild(renderToolPreviews(item._calls));
         return card;
     }
     if (item.kind === "final") {
@@ -8083,7 +8291,9 @@ function buildStepCard(item, idx, old) {
             }
         }
     }
-    if (item.kind === "code" && item.output !== undefined && item.phase !== "pending-run" && item.phase !== "running") {
+    if (item.phase === "running" && item._live) {
+        card.appendChild(el("pre", "output live-output", item._live));
+    } else if (item.kind === "code" && item.output !== undefined && item.phase !== "pending-run" && item.phase !== "running") {
         const out = String(item.output || "");
         const pre = el("pre", "output" + (item.status === "error" ? " is-error" : ""));
         pre.textContent = out.length > 200000 ? out.slice(0, 200000) + "\n[… display truncated; the full output is in the session export …]" : (out || "(no output)");
@@ -8281,10 +8491,25 @@ function patchStreamingCard(card, item) {
         think.querySelector("summary").textContent = thinking ? "🧠 Thinking…" : `🧠 Reasoning (${item.reasoning.length.toLocaleString()} chars)`;
     }
     const md = card.querySelector(":scope > .markdown");
+    const previews = card.querySelector(":scope > .tool-previews");
     if (item.content) {
         const fresh = renderMarkdown(item.content);
-        if (md) md.replaceWith(fresh); else card.appendChild(fresh);
+        if (md) md.replaceWith(fresh); else card.insertBefore(fresh, previews);
     }
+    if ((item._calls || []).length) {
+        if (!previews) return false;
+        patchToolPreviews(previews, item._calls);
+    }
+    return true;
+}
+
+// A running step's card: only its live output changes.
+function patchRunningCard(card, item) {
+    const pre = card.querySelector(":scope > pre.live-output");
+    if (!pre || !item._live) return false;
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+    pre.textContent = item._live;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
     return true;
 }
 
@@ -8297,13 +8522,16 @@ function renderTimelineItem(idx, isNew) {
     const old = tl.querySelector(`[data-idx="${idx}"]`);
     const nearBottom = tl.scrollHeight - tl.scrollTop - tl.clientHeight < 120;
     const phase = item.type === "step" ? item.phase || "" : "";
-    if (!(old && phase === "thinking" && old.dataset.phase === "thinking" && patchStreamingCard(old, item))) {
+    const patched = old && old.dataset.phase === phase
+        && (phase === "thinking" ? patchStreamingCard(old, item) : phase === "running" && patchRunningCard(old, item));
+    if (!patched) {
         const card = buildCard(item, idx, old);
         card.dataset.idx = idx;
         card.dataset.phase = phase;
         if (isNew && !old) card.classList.add("is-new");
         if (old) old.replaceWith(card);
         else tl.appendChild(card);
+        if (phase === "thinking" || phase === "running") followScroll([], [...card.querySelectorAll(".tool-preview pre, pre.live-output")]);
     }
     $("emptyState")?.remove();
     if (isNew || nearBottom) tl.scrollTop = tl.scrollHeight;

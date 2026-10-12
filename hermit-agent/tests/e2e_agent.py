@@ -131,6 +131,11 @@ print(len(rows), total)
             {"reasoning": "".join(f"Thought {i}: weighing the options carefully. " for i in range(120)),
              "content": "Streamed answer. " * 30, "delay": 0.02},
         ],
+        "E2E-LIVE": [
+            {**calls(("write_file", {"path": "gen.py", "content": "".join(f"print('line {i}')\n" for i in range(40))})), "delay": 0.06},
+            calls(("run_python", {"code": "import time\nprint('first')\nt = time.time()\nwhile time.time() - t < 2.5:\n    pass\nprint('second')"})),
+            calls(("finish", {"answer": "Done live."})),
+        ],
         "E2E-PHANTOM": [
             py("# reader.py\nimport csv\nprint('read')"),
             final("Created **`reader.py`** for you."),
@@ -683,6 +688,30 @@ def streaming_scenario(browser, port, state):
     check("reasoning streams into the same card and box", r["thinking"] and r["sameCard"] and r["sameBox"] and r["grew"] and r["rebuilt"] == 0, r)
     wait_until(page, "() => S.status === 'done'", 60, "final")
     check("re-rendered cards don't replay the entry animation", page.evaluate("() => document.querySelectorAll('#timeline .card.is-new').length") <= 2)
+    page.context.close()
+
+
+def live_scenario(browser, port, state):
+    print("— live: a tool call shows its arguments while it streams, run_python its output while it runs")
+    page = open_app(browser)
+    configure_at(page, f"http://127.0.0.1:{port}/tools/v1", 10)
+    page.fill("#taskInput", "E2E-LIVE: write and run")
+    page.click("#sendBtn")
+    wait_until(page, "() => (document.querySelector('.step-card .tool-preview pre code') || {}).textContent?.includes(\"print('line 3')\")", 30, "write_file preview")
+    first = page.evaluate("""() => { window.__card = document.querySelector('.step-card.phase-thinking');
+        const p = document.querySelector('.tool-preview'); return { text: p.textContent, caret: !!p.querySelector('pre code .stream-caret') }; }""")
+    check("the write_file preview names the file, counts lines and shows a caret", "gen.py" in first["text"] and "lines so far" in first["text"] and first["caret"], first)
+    time.sleep(0.6)
+    later = page.evaluate("""() => ({ same: window.__card.isConnected, streaming: S.timeline[1].phase === 'thinking',
+        text: document.querySelector('.tool-preview pre code').textContent })""")
+    check("…it grows line by line in the same card", later["same"] and len(later["text"]) > len(first["text"]) and later["text"].startswith("print('line 0')"), later)
+    wait_until(page, "() => (document.querySelector('.step-card.phase-running pre.live-output') || {}).textContent?.includes('first')", 30, "live output")
+    mid = page.evaluate("() => ({ text: document.querySelector('pre.live-output').textContent, phase: S.timeline[S.timeline.length - 1].phase })")
+    check("run_python's output shows while it runs", mid["phase"] == "running" and "first" in mid["text"] and "second" not in mid["text"], mid)
+    wait_until(page, "() => S.status === 'done'", 60, "finish")
+    st = steps(page)
+    check("…and the finished step keeps the full output", st[1]["output"] == "first\nsecond\n" and not page.evaluate("() => !!document.querySelector('pre.live-output, .tool-preview')"), st[1]["output"])
+    check("live state stays out of the session", page.evaluate("() => S.timeline.every(t => t._live == null && t._calls == null)"))
     page.context.close()
 
 
@@ -1877,7 +1906,7 @@ def main():
                     if exported:
                         import_scenario(browser, port, state, *exported)
                 for n, fn in [("approve", approve_scenario), ("autopilot", autopilot_scenario), ("step_limit", step_limit_scenario),
-                              ("streaming", streaming_scenario), ("phantom", phantom_scenario), ("stray_tag", stray_tag_scenario)]:
+                              ("streaming", streaming_scenario), ("live", live_scenario), ("phantom", phantom_scenario), ("stray_tag", stray_tag_scenario)]:
                     if want(n):
                         fn(browser, port, state)
                 if want("files"):

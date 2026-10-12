@@ -83,8 +83,9 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
   generated ids, replies without calls), native file batches through `applyFileActions`
   and `fileCallResults`, answering a pending `ask_user`/`finish`, `toolHistoryAsText`
   (calls written out parse back to the same actions), elision and compaction with tool
-  calls, the native system prompt and hints, and session format 2 (a system message
-  only as the first message).
+  calls, the native system prompt and hints, session format 2 (a system message
+  only as the first message), and `parsePartialJson`, which reads streaming arguments
+  for the live preview (every prefix of a call's JSON).
 - **`bundled.test.mjs`** covers the bundled libraries (Phase 3.5, DESIGN §8): the real
   `BUNDLED_LIBRARIES` manifest (Tier 1 and Tier 2 plus odfpy, pinned pure wheels from
   PyPI or, for odfpy, a pinned source archive to build one from, known `requires`),
@@ -266,6 +267,10 @@ it stall, on cue; see its docstring):
     network. The rendered Markdown carries no `data-action`/`data-idx`/`data-role` and no
     inline `style`, its link opens in a new tab, and clicking the real Reject button
     rejects the step rather than approving it with network — nothing reaches `/exfil`.
+21. **Live progress** (`live`): a `write_file` call streamed slowly shows its path, a line
+    count, a caret and its content growing in the same card; a `run_python` step that
+    prints, then busy-waits, shows the first line in the card while it still runs; the
+    finished step keeps the full output, and no live state reaches the session.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters
