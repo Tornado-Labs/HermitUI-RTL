@@ -4,7 +4,7 @@ import m from "./extract.mjs";
 import { check, section, report } from "./check.mjs";
 
 const { splitLetterFrame, buildCritiqueMessages, buildWholeRewriteMessages, buildSentenceFixMessages, wholeSpotNotes,
-    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainMessages, WHOLE_PASSES } = m;
+    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainMessages, buildOneRuleMessages, WHOLE_PLAIN_EN, WHOLE_PASSES } = m;
 
 const BODY_EN = "The Q3 budget review is next Thursday. I will send a full overview of the key figures by Tuesday.\n\n"
     + "The travel costs for the Berlin fair came in about 4,500 euros over our estimate.";
@@ -60,8 +60,11 @@ section("prompts");
     const body = buildChatBody("", [{ role: "user", content: "x" }], 0.6, false);
     check("chat body: model, temperature, no thinking", body.model === "local-model" && body.temperature === 0.6 && body.chat_template_kwargs.enable_thinking === false && body.stream === false);
     check("chat body: every pass prompt gets the no-hidden-marks line", body.messages[0].role === "system" && /no invisible|invisible characters/.test(body.messages[0].content) && body.messages[1].content === "x");
-    check("chat body without kwargs", !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true)));
-    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,plain,proof");
+    check("chat body without kwargs", !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true)) && !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true, "low")));
+    const thinking = buildChatBody("m", [], 0.5, false, "low").chat_template_kwargs;
+    check("chat body with thinking: on, at the effort asked for", thinking.enable_thinking === true && thinking.reasoning_effort === "low");
+    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,plain,verdicts,objections,everyday,speaker,alternatives,proof");
+    check("passes: every English Plainer pass has a pass entry", WHOLE_PLAIN_EN.every(p => WHOLE_PASSES.some(q => q.id === p.id)) && WHOLE_PLAIN_EN.length === 5);
 }
 
 section("wholeSpotNotes");
@@ -179,7 +182,7 @@ section("wholeRewrite");
     const script = (facts, extra) => {
         const calls = [];
         const answers = { critique: "- \"comprehensive\": buzzword", rewrite: REWRITE, retry: REWRITE, review: "- \"before the Q3\" -> tidy", sentences: SENTENCES, facts, fix: SENTENCES.replace("4,500", "4,500"), spots: SPOTS, proof: c => c.find(x => x.id === "proof").messages[1].content, ...extra };
-        return { calls, chat: async (id, messages, maxTokens) => { calls.push({ id, messages, maxTokens }); if (answers[id] instanceof Error) throw answers[id]; return typeof answers[id] === "function" ? answers[id](calls) : answers[id]; } };
+        return { calls, chat: async (id, messages, maxTokens, think) => { calls.push({ id, messages, maxTokens, think }); if (answers[id] instanceof Error) throw answers[id]; return typeof answers[id] === "function" ? answers[id](calls) : answers[id]; } };
     };
     let s = script("OK");
     let r = await wholeRewrite(LETTER_EN, "en", { details: "" }, s.chat);
@@ -227,7 +230,37 @@ section("wholeRewrite");
     check("plain: an error it brings in goes to a fix", s.calls.map(c => c.id).slice(-4).join() === "plain,facts,fix,proof" && r.info.errors.length === 1, s.calls.map(c => c.id));
     s = script("OK", { plain: "x" });
     await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
-    check("plain: German only", !s.calls.some(c => c.id === "plain"));
+    check("plain: the German pass on German text only", !s.calls.some(c => c.id === "plain"));
+    check("plain: no thinking for German", !(await (async () => { const t = scriptDe(); await wholeRewrite(LETTER_DE, "de", { plain: true }, t.chat); return t.calls.some(c => c.think); })()));
+    // Plainer on English text: five one-rule passes, each editing what the one before left.
+    const step = (a, b) => c => c[c.length - 1].messages[1].content.replace(a, b);
+    const scriptEn = extra => script("OK", { verdicts: step("I'll send you", "You get"), objections: step("key figures", "main numbers"), everyday: step("came in about", "ran about"),
+        speaker: step("over the estimate", "over what we planned"), alternatives: step("ahead of the Q3", "before the Q3"), ...extra });
+    s = scriptEn();
+    r = await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    check("plain en: five passes before the proofreading, then the fact check again", s.calls.map(c => c.id).slice(-7).join() === "verdicts,objections,everyday,speaker,alternatives,facts,proof"
+        && r.body === "You get the main numbers by Tuesday, before the Q3 review next Thursday. The Berlin trip ran about 4,500 euros over what we planned.", [s.calls.map(c => c.id), r.body]);
+    check("plain en: each pass gets the text the one before left", s.calls.find(c => c.id === "objections").messages[1].content.startsWith("You get the key figures"));
+    check("plain en: the rewrite and the five passes think, the checks don't", s.calls.filter(c => c.think === "low").map(c => c.id).join() === "rewrite,verdicts,objections,everyday,speaker,alternatives", s.calls.filter(c => c.think).map(c => c.id));
+    s = scriptEn({ verdicts: "x" });
+    r = await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    check("plain en: a refused pass leaves the text for the next", r.info.passes.some(p => p.id === "verdicts" && !p.ok) && s.calls.find(c => c.id === "objections").messages[1].content === SPOTS);
+    s = scriptEn({ facts: c => c.filter(x => x.id === "facts").length > 1 ? "- \"main numbers\" -> the original says key figures" : "OK",
+        fix: c => c[c.length - 1].messages[1].content + " I will send a full overview of the key figures by Tuesday.", spots: c => c.filter(x => x.id === "spots").length > 1 ? "You get the numbers by Tuesday." : SPOTS });
+    r = await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    check("plain: a fix that copies the original's wording gets a spots pass", s.calls.map(c => c.id).slice(-4).join() === "facts,fix,spots,proof"
+        && s.calls[s.calls.length - 2].messages[0].content.includes("copied from the original"), s.calls.map(c => c.id));
+    s = scriptEn();
+    await wholeRewrite(LETTER_EN, "en", {}, s.chat);
+    check("plain en: off unless asked for, and no thinking then", !s.calls.some(c => WHOLE_PLAIN_EN.some(p => p.id === c.id) || c.think));
+    const om = buildOneRuleMessages("A text.", WHOLE_PLAIN_EN[0].rule);
+    check("one-rule prompt: the rule, the keep-the-rest frame, and the text", om[0].content.includes("Change only one thing: two kinds of sentences change") && om[0].content.includes("Leave every other sentence exactly as it is") && om[1].content === "A text.");
+    check("one-rule prompts name no other language", WHOLE_PLAIN_EN.every(p => !/German|Deutsch/.test(buildOneRuleMessages("t", p.rule)[0].content)));
+    const long = "We moved the review to Friday. It helps everyone. Here's what that means. The team gets one more day. That is the fix.";
+    check("verdicts may cut to half", acceptWholeRewrite(long, long, "We moved the review to Friday. The team gets one more day.", "en", "verdicts").ok);
+    const short = "We moved the review to Friday, so the team gets one more day for testing.";
+    check("a later pass is measured against the text it got, not the original", acceptWholeRewrite(long.repeat(4), short, "We moved the review to Friday. The team gets one more day for testing.", "en", "everyday").ok);
+    check("other passes may not cut that much", !acceptWholeRewrite(long, long, "We moved the review to Friday. The team gets one more day.", "en", "everyday").ok);
     s = scriptDe();
     await wholeRewrite(LETTER_DE, "de", {}, s.chat);
     check("plain: off unless asked for", !s.calls.some(c => c.id === "plain"));

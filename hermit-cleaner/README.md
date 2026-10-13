@@ -4,7 +4,7 @@
 sentences or paragraphs reworded by your own local model (or the whole text rewritten
 in several passes), and a few natural typos.*
 
-> **Status: v0.4.2.** One self-contained HTML file in two flavours:
+> **Status: v0.4.3.** One self-contained HTML file in two flavours:
 > [`dist/hermit-cleaner-standalone.html`](dist/hermit-cleaner-standalone.html) (≈ 380 KB)
 > rewords through a model server, and
 > [`dist/hermit-cleaner-wllama.html`](dist/hermit-cleaner-wllama.html) (≈ 3.6 MB) can also
@@ -139,6 +139,15 @@ change the order and the structure, and add typical everyday examples. The text'
 claim stays, the facts it keeps stay right, and it adds no figures, names or dates. A
 number that went with a dropped point is listed in the report. Read the result: it is
 no longer the same text.
+
+**Plainer** (German and English text, off by default) adds passes before the
+proofreading, then runs the fact check once more. German text gets one pass in plain
+spoken German with short sentences. English text gets five, each changing one kind of
+sentence and leaving the rest: verdicts and sentences that only set up the next one,
+an objection raised and answered, formal and product-copy phrases, general claims
+without a speaker, and the alternatives and explanations set against a piece of
+advice. On a server the rewrite and these five passes run with a little thinking, so
+it takes several minutes on a large model.
 
 The output shows every change: hover a highlight to see what was there before.
 **Copy** copies the plain text.

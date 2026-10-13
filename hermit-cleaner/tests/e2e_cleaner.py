@@ -300,7 +300,7 @@ def scenarios(page, port, state, browser_name):
           and "strict editor who cuts AI filler" in systems[6], len(systems))
     check("the rewrite may change the content", "may change the content" in systems[2] and "may change the content" not in systems[0], systems[2][:300])
     check("the fact check allows dropped points", "allowed to change the content" in systems[5], systems[5][:200])
-    check("Short sentences (German) is off by default", not page.is_checked("#optPlain"))
+    check("Plainer is off by default", not page.is_checked("#optPlain"))
     check("output keeps the frame", out == "Hi Sarah,\n\n" + WHOLE_FIXED + "\n\nBest regards,\nTom\n", repr(out))
     check("report names Rewrite freely", "Rewrite freely:" in page.text_content("#report"), page.text_content("#report"))
 

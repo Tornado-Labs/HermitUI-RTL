@@ -686,9 +686,9 @@ body.is-running .options {
                     <span>About you</span>
                     <input type="text" id="optDetails" class="text-field" maxlength="600" placeholder="optional: who you are, a real example" aria-label="Facts about you for Rewrite whole text">
                 </label>
-                <label class="step" title="Used by Rewrite whole text on German text: a last pass in plain spoken German with short sentences, then the fact check again. Reads simpler.">
+                <label class="step" title="Used by Rewrite whole text on German and English text, then the fact check again. German: one more pass in plain spoken German with short sentences. English: five more passes, each changing one kind of sentence (verdicts and set-ups, objection and answer, formal phrases, claims without a speaker, alternatives and explanations), with thinking on a server. Reads plainer, takes longer.">
                     <input type="checkbox" id="optPlain">
-                    <span>Short sentences (German)</span>
+                    <span>Plainer (German, English)</span>
                 </label>
                 <label class="step">
                     <input type="checkbox" id="optTypos">
@@ -831,7 +831,7 @@ body.is-running .options {
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.4.2";
+const APP_VERSION = "0.4.3";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -2017,8 +2017,15 @@ const WHOLE_PASSES = [
     { id: "spots", label: "fixing contrasts and stock phrases", temperature: 0.5 },
     // Rewrite freely only: the filler sentences the later passes put back, cut.
     { id: "slop", label: "finding filler sentences", temperature: 0.2, notes: true },
-    // Short sentences (German) only: the text again in plain spoken German.
+    // Plainer only. German: the text again in plain spoken German.
     { id: "plain", label: "writing short sentences", temperature: 0.6 },
+    // English: one edit of one kind per pass (WHOLE_PLAIN_EN), each with a little
+    // thinking.
+    { id: "verdicts", label: "cutting verdicts and set-ups", temperature: 0.5 },
+    { id: "objections", label: "reporting objections plainly", temperature: 0.5 },
+    { id: "everyday", label: "using everyday words", temperature: 0.5 },
+    { id: "speaker", label: "giving claims a speaker", temperature: 0.5 },
+    { id: "alternatives", label: "cutting alternatives", temperature: 0.5 },
     { id: "proof", label: "proofreading", temperature: 0.1 },
 ];
 
@@ -2074,7 +2081,7 @@ function buildPlanMessages(text, lang, critique, letter) {
     ];
 }
 
-// Pass "plain" (Short sentences, German only): the same content in plain spoken German, long
+// Pass "plain" (Plainer, German): the same content in plain spoken German, long
 // sentences split, everyday verbs instead of noun chains, the main noun repeated. The fact
 // check runs again after it.
 function buildPlainMessages(text) {
@@ -2082,6 +2089,47 @@ function buildPlainMessages(text) {
         { role: "system", content: "Schreib den Text in einfacherem, gesprochenem Deutsch auf, ohne den Inhalt zu \u00e4ndern. Ersetze lange W\u00f6rter und Substantivketten durch einfache Verben und Alltagsw\u00f6rter (\"die Einarbeitung neuer Kr\u00e4fte bindet enormen Aufwand\" -> \"es ist viel Arbeit, die Neuen einzuarbeiten\"). "
             + "Teile lange S\u00e4tze; ab und zu ein Satz mit drei bis f\u00fcnf W\u00f6rtern. Wiederhole das Hauptwort, statt ein Synonym zu suchen. Kein Slang, keine Fragen, keine erfundenen Beispiele oder S\u00e4tze. "
             + "Anrede, Zahlen, Namen und Daten bleiben genau gleich, nichts kommt dazu, nichts f\u00e4llt weg. Korrektes Deutsch. Antworte nur mit dem Text." },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// The English passes of Plainer, in order. Each changes one kind of sentence and leaves
+// the rest as it is: a model handles one such job well, and a long list of them in one
+// prompt mostly not.
+const WHOLE_PLAIN_EN = [
+    { id: "verdicts", rule: "two kinds of sentences change, everything else stays. (1) A sentence that says what something is good for, why it works, or judges "
+        + "it (helps, allows, enables, ensures, boosts, improves, fosters, leads to, keeps, makes it easier, is key, is real, is the fix, the "
+        + "problem is, works best, pays off). (2) A sentence or opening that only announces, links or sets up what comes (\"here's what that "
+        + "means\", \"here's what it does\", \"the reason is straightforward:\", \"which brings you to\", \"this follows from that\", "
+        + "\"what matters is\", \"what breaks is\", \"the single most useful thing you can do is\", \"the problem shows up in\"). Each "
+        + "becomes a plain sentence about what people do or what happens, using only what the text says, or is cut if there is nothing "
+        + "concrete to say. A paragraph starts with its first concrete statement." },
+    { id: "objections", rule: "a passage that raises a worry or objection and then answers it (people worry, critics say, some fear, people raise concerns ... "
+        + "but, however, yet trials show, it turns out, it was manageable) becomes a plain report of what happened in the cases the text names, "
+        + "or of what the writer recommends, without the worry-then-answer shape. Keep the facts of both sides." },
+    { id: "everyday", rule: "every formal or stock phrase, the kind found in product copy, reports or AI text (\"view order statuses in real time\", "
+        + "\"update billing information\", \"access support resources\", \"your data is protected with\", \"enhance\", \"leverage\", "
+        + "\"streamline\", \"facilitate\", \"utilize\", \"a wide range of\", \"accumulated stress\", \"output per hour\", \"engagement\") "
+        + "is replaced by the everyday words a person would say out loud (\"see where your order is\", \"change your billing details\", "
+        + "\"find the support pages\", \"we encrypt your data\"). Prefer verbs to nouns. Same meaning, every fact, number and name kept." },
+    { id: "speaker", rule: "every general claim the text states as a plain fact without saying where it comes from is given a speaker, the way this kind "
+        + "of text would: where the writer tells about their own work or team (I, we), as what they saw, did or noticed (\"the team pushed "
+        + "back\", \"we noticed\"), never as a guess; in instructions or a how-to, as what you will see or find when you do it (\"you'll "
+        + "notice\", \"you'll find\"); only in a text that argues for a position, as the writer's own expectation (\"I'd expect\", "
+        + "\"I don't think\"). One or two such words per paragraph, not on every sentence. A claim from people or reports the text names "
+        + "is told as what they found. Plain facts, numbers, history and instructions stay as they are. Name no source the text doesn't "
+        + "name and give the writer no experiences the text doesn't give them." },
+    { id: "alternatives", rule: "two things are cut, everything else stays word for word. (1) The alternative the text sets a point against: \"instead of X\", "
+        + "\"rather than X\", \"not X but\" clauses, where X is what you should not do or what the thing is not; keep the point itself. "
+        + "(2) An explanation of why a piece of advice works (\"because pajamas tell your body...\", \"so your mind can...\", \"the context "
+        + "itself does the nudging\"); keep the advice itself. Keep every fact, number and name." },
+];
+
+// One English pass of Plainer: the text, edited by one rule of WHOLE_PLAIN_EN.
+function buildOneRuleMessages(text, rule) {
+    return [
+        { role: "system", content: `Edit the text below and keep it in English. Change only one thing: ${rule} `
+            + "Leave every other sentence exactly as it is, keep the paragraphs, every fact, number and name, and add nothing the text doesn't say. Reply with the edited text only." },
         { role: "user", content: String(text).trim() },
     ];
 }
@@ -2427,7 +2475,9 @@ function acceptWholeRewrite(orig, prev, reply, lang, pass) {
     if (!t) return { ok: false, reason: "empty reply" };
     const lead = x => (x.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).slice(0, 3).join(" ");
     if (PREAMBLE_RE.test(t) && !(PREAMBLE_RE.test(p) && lead(t) === lead(p))) return { ok: false, reason: "the model added an introduction" };
-    if (t.length / Math.max(1, o.length) < 0.3) return { ok: false, reason: "reply much shorter than the original" };
+    // A later pass is measured against the text it was given: a free rewrite may already
+    // be much shorter than the original.
+    if (t.length / Math.max(1, (pass === "rewrite" ? o : p).length) < 0.3) return { ok: false, reason: "reply much shorter than the original" };
     if (t.length / Math.max(1, o.length) > 1.8) return { ok: false, reason: "reply much longer than the original" };
     const got = lang ? detectLanguage(t) : null;
     if (got && got !== lang) return { ok: false, reason: `the model answered in ${LANGUAGE_NAMES[got]} instead of ${LANGUAGE_NAMES[lang]}` };
@@ -2446,10 +2496,11 @@ function acceptWholeRewrite(orig, prev, reply, lang, pass) {
         // is clearly that or the edit is otherwise small; an unrelated reply is far off both.
         if (toOrig < toPrev && (toOrig < 0.3 || toPrev <= 0.6)) return { ok: false, reason: "the model went back to the original wording" };
         if (toPrev > 0.6) return { ok: false, reason: "the model rewrote far more than it was asked to" };
-        // Only the fact fix may shorten (an invented detail goes); the other passes keep
-        // the text's points.
+        // Only the fact fix may shorten (an invented detail goes), and the English passes
+        // of Plainer that cut verdicts and set-ups; the other passes keep the text's points.
         const words = x => (x.match(/[\p{L}\p{N}]+/gu) || []).length;
-        if (pass !== "fix" && words(t) < 0.8 * words(p)) return { ok: false, reason: "the model cut part of the text" };
+        const floor = pass === "fix" ? 0 : pass === "verdicts" || pass === "alternatives" ? 0.5 : 0.8;
+        if (words(t) < floor * words(p)) return { ok: false, reason: "the model cut part of the text" };
         // A later pass may not lose a figure the text still had.
         const lost = missingNumbers(p, t).filter(n => !missingNumbers(o, p).includes(n) && o.includes(n));
         if (lost.length) return { ok: false, reason: `the model dropped the number ${lost[0]}` };
@@ -2458,8 +2509,9 @@ function acceptWholeRewrite(orig, prev, reply, lang, pass) {
 }
 
 // Run the passes of WHOLE_PASSES on `text` (in language `lang`; `o` holds tone, extra
-// and details). `chat(passId, messages, maxTokens)` returns the model's reply. Only the
-// body of a letter goes to the model (splitLetterFrame). Each text reply is checked by
+// and details). `chat(passId, messages, maxTokens, think)` returns the model's reply;
+// `think` ("low") asks for a short reasoning trace (English text with Plainer on). Only
+// the body of a letter goes to the model (splitLetterFrame). Each text reply is checked by
 // acceptWholeRewrite: a refused pass leaves the text as it was before it, a refused
 // rewrite gets one second try (and, when both copied the text, a draft written from
 // notes of it), and if that fails too `info.failed` says why and the body
@@ -2489,17 +2541,19 @@ async function wholeRewrite(text, lang, o, chat) {
         const critique = stripThinking(await chat("critique", buildCritiqueMessages(orig), notesTokens));
         const plan = o.free ? stripThinking(await chat("plan", buildPlanMessages(orig, lang, critique, frame.letter), notesTokens)) : "";
         const ro = { ...o, critique, plan, letter: frame.letter };
-        let v = use("rewrite", await chat("rewrite", buildWholeRewriteMessages(orig, lang, ro), textTokens));
+        // The English passes of Plainer were worked out on a rewrite written with thinking.
+        const think = o.plain && lang === "en" ? "low" : undefined;
+        let v = use("rewrite", await chat("rewrite", buildWholeRewriteMessages(orig, lang, ro), textTokens, think));
         if (!v.ok) {
             const retry = v.address ? `Your first answer changed how the reader is addressed. The text says "${v.address}"; keep exactly that form.`
                 : /barely changed/.test(v.reason) ? "Your first answer copied most of the text word for word. Write every sentence anew, in your own words: copy no sentence of the text."
                 : `Your first answer was refused (${v.reason}). Avoid that this time.`;
             info.passes.pop();
-            v = use("rewrite", await chat("retry", buildWholeRewriteMessages(orig, lang, { ...ro, retry }), textTokens));
+            v = use("rewrite", await chat("retry", buildWholeRewriteMessages(orig, lang, { ...ro, retry }), textTokens, think));
             if (!v.ok && /barely changed/.test(v.reason)) {
                 const outline = stripThinking(await chat("outline", buildOutlineMessages(orig, lang), textTokens)).trim();
                 info.passes.pop();
-                v = use("rewrite", await chat("draft", buildWholeRewriteMessages(outline || orig, lang, { ...ro, fromNotes: !!outline }), textTokens));
+                v = use("rewrite", await chat("draft", buildWholeRewriteMessages(outline || orig, lang, { ...ro, fromNotes: !!outline }), textTokens, think));
             }
             if (!v.ok) { info.failed = v.reason; return { frame, body: orig, info }; }
         }
@@ -2528,10 +2582,17 @@ async function wholeRewrite(text, lang, o, chat) {
             const c = cutFillerSentences(cur, await chat("slop", buildSlopFindMessages(cur, lang), notesTokens), lang);
             if (c.cut.length) { cur = c.text; info.cut = c.cut; }
         }
-        if (o.plain && lang === "de") {
-            use("plain", await chat("plain", buildPlainMessages(cur), textTokens));
+        if (o.plain && (lang === "de" || lang === "en")) {
+            if (lang === "de") use("plain", await chat("plain", buildPlainMessages(cur), textTokens));
+            else for (const p of WHOLE_PLAIN_EN) use(p.id, await chat(p.id, buildOneRuleMessages(cur, p.rule), textTokens, think));
             const errs = factCheckErrors(await chat("facts", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError).slice(0, 12);
-            if (errs.length) { info.errors = info.errors.concat(errs); use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, errs), textTokens)); }
+            if (errs.length) {
+                info.errors = info.errors.concat(errs);
+                use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, errs), textTokens));
+                // A fix that put a point back can bring the original's sentence with it.
+                const again = wholeSpotNotes(cur, lang, orig);
+                if (again.length) use("spots", await chat("spots", buildSpotFixMessages(cur, lang, again), textTokens));
+            }
         }
         use("proof", await chat("proof", buildProofreadMessages(cur, lang), textTokens));
         // Unchanged is the usual answer here, not a refusal.
@@ -2548,9 +2609,11 @@ async function wholeRewrite(text, lang, o, chat) {
 }
 
 // The chat request body for one pass, as buildRewriteBody makes it for a passage.
-function buildChatBody(model, messages, temperature, noKwargs) {
+// `think` ("low") turns thinking on at that effort; the trace comes back apart from the
+// reply or is stripped.
+function buildChatBody(model, messages, temperature, noKwargs, think) {
     const body = { model: model || "local-model", messages: withNoHiddenMarks(messages), temperature, stream: false };
-    if (!noKwargs) body.chat_template_kwargs = { enable_thinking: false };
+    if (!noKwargs) body.chat_template_kwargs = think ? { enable_thinking: true, reasoning_effort: think } : { enable_thinking: false };
     return body;
 }
 
@@ -3495,11 +3558,12 @@ if (typeof document !== "undefined") {
     }
 
     // One pass of Rewrite whole text. `maxTokens` bounds the reply in the browser only.
-    async function chatOnce(messages, temperature, maxTokens, signal) {
+    // `think` is for a server only: the model in the tab always answers without thinking.
+    async function chatOnce(messages, temperature, maxTokens, signal, think) {
         // @wllama:start
         if (backendMode === "wllama") return wllamaChat(withNoHiddenMarks(messages), temperature, maxTokens, signal);
         // @wllama:end
-        return apiChat(noKwargs => buildChatBody(MODEL_NAME, messages, temperature, noKwargs), signal);
+        return apiChat(noKwargs => buildChatBody(MODEL_NAME, messages, temperature, noKwargs, think), signal);
     }
 
     // POST the body `makeBody(noKwargs)` to the chat endpoint and return the reply text.
@@ -3536,10 +3600,10 @@ if (typeof document !== "undefined") {
     // Rewrite whole text (wholeRewrite), with the status line, cleanup of the model's
     // answer and the marks for the output pane.
     async function rewriteWhole(text, marks, lang, signal, o) {
-        const r = await wholeRewrite(text, lang, o, (id, messages, maxTokens) => {
+        const r = await wholeRewrite(text, lang, o, (id, messages, maxTokens, think) => {
             const k = WHOLE_PASSES.findIndex(p => p.id === id);
             setStatus(`Rewriting the whole text, pass ${k + 1} of ${WHOLE_PASSES.length}: ${WHOLE_PASSES[k].label}…`, "busy");
-            return chatOnce(messages, WHOLE_PASSES[k].temperature, maxTokens, signal);
+            return chatOnce(messages, WHOLE_PASSES[k].temperature, maxTokens, signal, think);
         });
         const info = r.info;
         if (r.body === r.frame.body) return { text, marks, info };

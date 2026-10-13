@@ -151,16 +151,21 @@ poll with `page.evaluate` instead.
     sind froh" with no retry involved: German meaning errors are a model limit, not a
     prompt one. Read German rewrites, don't count them.
 - **Rewrite whole text.** `wholeRewrite` (pure section, "Stage 2b") runs the passes of
-  `WHOLE_PASSES` with the model call injected (`chat(passId, messages, maxTokens)`), so
+  `WHOLE_PASSES` with the model call injected (`chat(passId, messages, maxTokens, think)`), so
   `tests/whole.test.mjs` scripts every pass. Each text reply goes through
   `acceptWholeRewrite`; `wholeSpotNotes` finds the spots for the spots pass in code. The
   DOM side (`rewriteWhole`, `chatOnce`) only feeds it the chosen backend.
   **Rewrite freely** is the same call with `o.free`: a `plan` pass
   (`buildPlanMessages`) before the rewrite, content rules in place of the keep-every-claim
   ones, a fact check that allows dropped points, and no missing-number errors for the fix.
-  **Short sentences (German)** (`#optPlain`, `o.plain`, German text only, off by default):
-  a `plain` pass (`buildPlainMessages`) before the proofreading puts the text into plain
-  spoken German with short sentences, then the fact check and fix run once more on it.
+  **Plainer** (`#optPlain`, `o.plain`, German and English text, off by default): passes
+  before the proofreading, then the fact check and fix once more. German: a `plain` pass
+  (`buildPlainMessages`), plain spoken German with short sentences. English: the five
+  passes of `WHOLE_PLAIN_EN` (`buildOneRuleMessages`), one kind of sentence each; a
+  single prompt holding all five rules did not work. With English Plainer the rewrite and
+  these passes ask a server for thinking (`think: "low"` -> `chat_template_kwargs`
+  `{enable_thinking, reasoning_effort}`); the in-browser model never thinks. The passes
+  that cut (`verdicts`, `alternatives`) may shorten the text to half.
 - **Every prompt** starts with `NO_HIDDEN_MARKS` (`withNoHiddenMarks` in `buildChatBody`,
   `buildRewriteBody` and the in-browser path). The e2e mock (`tests/mock_openai.py`) skips
   that first line when it tells the passes apart.
