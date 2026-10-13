@@ -158,6 +158,12 @@ poll with `page.evaluate` instead.
   **Rewrite freely** is the same call with `o.free`: a `plan` pass
   (`buildPlanMessages`) before the rewrite, content rules in place of the keep-every-claim
   ones, a fact check that allows dropped points, and no missing-number errors for the fix.
+  **Short sentences (German)** (`#optPlain`, `o.plain`, German text only, off by default):
+  a `plain` pass (`buildPlainMessages`) before the proofreading puts the text into plain
+  spoken German with short sentences, then the fact check and fix run once more on it.
+- **Every prompt** starts with `NO_HIDDEN_MARKS` (`withNoHiddenMarks` in `buildChatBody`,
+  `buildRewriteBody` and the in-browser path). The e2e mock (`tests/mock_openai.py`) skips
+  that first line when it tells the passes apart.
 - **Tests:** pure logic goes in unit tests that slice the real functions out of
   `src/script.js` (`tests/extract.mjs`, the same approach as `../tests/`). Renaming a
   function fails the suite; update the lists there. DOM behaviour goes in

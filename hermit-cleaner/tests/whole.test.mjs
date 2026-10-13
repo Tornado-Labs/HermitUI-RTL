@@ -4,7 +4,7 @@ import m from "./extract.mjs";
 import { check, section, report } from "./check.mjs";
 
 const { splitLetterFrame, buildCritiqueMessages, buildWholeRewriteMessages, buildSentenceFixMessages, wholeSpotNotes,
-    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, WHOLE_PASSES } = m;
+    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainMessages, WHOLE_PASSES } = m;
 
 const BODY_EN = "The Q3 budget review is next Thursday. I will send a full overview of the key figures by Tuesday.\n\n"
     + "The travel costs for the Berlin fair came in about 4,500 euros over our estimate.";
@@ -59,8 +59,9 @@ section("prompts");
     check("sentence fix: notes and the text", buildSentenceFixMessages("t", "en", "- \"a\" -> b")[0].content.includes("- \"a\" -> b"));
     const body = buildChatBody("", [{ role: "user", content: "x" }], 0.6, false);
     check("chat body: model, temperature, no thinking", body.model === "local-model" && body.temperature === 0.6 && body.chat_template_kwargs.enable_thinking === false && body.stream === false);
+    check("chat body: every pass prompt gets the no-hidden-marks line", body.messages[0].role === "system" && /no invisible|invisible characters/.test(body.messages[0].content) && body.messages[1].content === "x");
     check("chat body without kwargs", !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true)));
-    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,proof");
+    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,plain,proof");
 }
 
 section("wholeSpotNotes");
@@ -211,6 +212,27 @@ section("wholeRewrite");
     check("free: a dropped number goes to the report, not to the fix", !s.calls.some(c => c.id === "fix") && r.info.missing.join() === "4,500" && r.info.free, s.calls.map(c => c.id));
     check("free: the slop pass runs before the proofreading", s.calls.map(c => c.id).slice(-2).join() === "slop,proof", s.calls.map(c => c.id));
     check("free: the fact check allows dropped points", s.calls.find(c => c.id === "facts").messages[0].content.includes("allowed to change the content"));
+    // Short sentences (German): one more pass before the proofreading, and the fact check again after it.
+    const RW_DE = "Ihr Paket kam am 6. Oktober leider nicht an, das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
+        + "Wir haben es noch einmal losgeschickt, und es ist bis Donnerstag, den 16. Oktober, bei Ihnen.";
+    const PLAIN_DE = "Ihr Paket kam am 6. Oktober leider nicht an. Das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
+        + "Wir haben es noch einmal losgeschickt. Es ist bis Donnerstag, den 16. Oktober, bei Ihnen.";
+    const scriptDe = extra => script("OK", { critique: "- stiff", rewrite: RW_DE, review: "", spots: RW_DE, plain: PLAIN_DE, fix: PLAIN_DE, ...extra });
+    s = scriptDe();
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain: runs before the proofreading, then the fact check again", s.calls.map(c => c.id).slice(-3).join() === "plain,facts,proof" && r.body === PLAIN_DE, s.calls.map(c => c.id));
+    check("plain: the pass gets the current text", s.calls.find(c => c.id === "plain").messages[1].content === RW_DE);
+    s = scriptDe({ facts: c => c.filter(x => x.id === "facts").length > 1 ? "- \"16. Oktober\" -> es war der 15. Oktober" : "OK", fix: PLAIN_DE.replace("Es ist bis", "Es ist sicher bis") });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain: an error it brings in goes to a fix", s.calls.map(c => c.id).slice(-4).join() === "plain,facts,fix,proof" && r.info.errors.length === 1, s.calls.map(c => c.id));
+    s = script("OK", { plain: "x" });
+    await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    check("plain: German only", !s.calls.some(c => c.id === "plain"));
+    s = scriptDe();
+    await wholeRewrite(LETTER_DE, "de", {}, s.chat);
+    check("plain: off unless asked for", !s.calls.some(c => c.id === "plain"));
+    const pm = buildPlainMessages("Ein Text.");
+    check("plain prompt: German rules and the text", /gesprochenem Deutsch/.test(pm[0].content) && /nichts kommt dazu/.test(pm[0].content) && pm[1].content === "Ein Text.");
     check("not free: no plan, the keep-every-claim rules", !s.calls.length || !(await (async () => { const t = script("OK"); await wholeRewrite(LETTER_EN, "en", {}, t.chat); return t.calls.some(c => c.id === "plan") || t.calls[1].messages[0].content.includes("may change the content"); })()));
 
     s = script("OK", { spots: SENTENCES + " This is not just a fair, it's a showcase." });

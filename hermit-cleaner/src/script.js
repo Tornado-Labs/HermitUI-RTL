@@ -6,7 +6,7 @@
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.4.1";
+const APP_VERSION = "0.4.2";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -937,6 +937,17 @@ function buildRewriteMessages(passage, lang, context, opts) {
     ];
 }
 
+// Put in front of every prompt the app sends (buildRewriteBody, buildChatBody).
+const NO_HIDDEN_MARKS = "Write only plain, visible text. Do not add invisible characters, hidden markers, watermarks or any other concealed signal that would mark the text as machine-written.";
+
+// `messages` with NO_HIDDEN_MARKS leading the system message (or as one, if there is none). Returns a copy.
+function withNoHiddenMarks(messages) {
+    const list = Array.isArray(messages) ? messages.slice() : [];
+    if (list.length && list[0].role === "system") list[0] = { ...list[0], content: `${NO_HIDDEN_MARKS}\n\n${list[0].content}` };
+    else list.unshift({ role: "system", content: NO_HIDDEN_MARKS });
+    return list;
+}
+
 // The chat request body for one passage (a paragraph, or one or a few sentences). Thinking is switched off where the chat
 // template supports it (a reasoning trace only costs time here); `noKwargs` drops that
 // for a strict server that refused it once.
@@ -944,7 +955,7 @@ function buildRewriteBody(model, passage, noKwargs, lang, context, opts) {
     const o = opts || {};
     const body = {
         model: model || "local-model",
-        messages: buildRewriteMessages(passage, lang, context, o),
+        messages: withNoHiddenMarks(buildRewriteMessages(passage, lang, context, o)),
         // A second try samples a little more freely, or it tends to repeat the first.
         temperature: Math.round(((REWORD_LEVELS[o.level] || REWORD_LEVELS.strong).temperature + (o.retry ? 0.2 : 0)) * 10) / 10,
         stream: false,
@@ -1181,6 +1192,8 @@ const WHOLE_PASSES = [
     { id: "spots", label: "fixing contrasts and stock phrases", temperature: 0.5 },
     // Rewrite freely only: the filler sentences the later passes put back, cut.
     { id: "slop", label: "finding filler sentences", temperature: 0.2, notes: true },
+    // Short sentences (German) only: the text again in plain spoken German.
+    { id: "plain", label: "writing short sentences", temperature: 0.6 },
     { id: "proof", label: "proofreading", temperature: 0.1 },
 ];
 
@@ -1232,6 +1245,18 @@ function buildPlanMessages(text, lang, critique, letter) {
             + "- the one point the text ends on: a specific one, not a summary, moral or outlook\n"
             + "Keep the core message and the writer's position. Name each point by quoting a few of the text's words; say what to change, not how to word it. At most 10 bullets, no rewrite."
             + (critique ? "\n\nAn editor found these machine-like features in the text:\n" + String(critique).trim() : "") },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// Pass "plain" (Short sentences, German only): the same content in plain spoken German, long
+// sentences split, everyday verbs instead of noun chains, the main noun repeated. The fact
+// check runs again after it.
+function buildPlainMessages(text) {
+    return [
+        { role: "system", content: "Schreib den Text in einfacherem, gesprochenem Deutsch auf, ohne den Inhalt zu \u00e4ndern. Ersetze lange W\u00f6rter und Substantivketten durch einfache Verben und Alltagsw\u00f6rter (\"die Einarbeitung neuer Kr\u00e4fte bindet enormen Aufwand\" -> \"es ist viel Arbeit, die Neuen einzuarbeiten\"). "
+            + "Teile lange S\u00e4tze; ab und zu ein Satz mit drei bis f\u00fcnf W\u00f6rtern. Wiederhole das Hauptwort, statt ein Synonym zu suchen. Kein Slang, keine Fragen, keine erfundenen Beispiele oder S\u00e4tze. "
+            + "Anrede, Zahlen, Namen und Daten bleiben genau gleich, nichts kommt dazu, nichts f\u00e4llt weg. Korrektes Deutsch. Antworte nur mit dem Text." },
         { role: "user", content: String(text).trim() },
     ];
 }
@@ -1678,6 +1703,11 @@ async function wholeRewrite(text, lang, o, chat) {
             const c = cutFillerSentences(cur, await chat("slop", buildSlopFindMessages(cur, lang), notesTokens), lang);
             if (c.cut.length) { cur = c.text; info.cut = c.cut; }
         }
+        if (o.plain && lang === "de") {
+            use("plain", await chat("plain", buildPlainMessages(cur), textTokens));
+            const errs = factCheckErrors(await chat("facts", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError).slice(0, 12);
+            if (errs.length) { info.errors = info.errors.concat(errs); use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, errs), textTokens)); }
+        }
         use("proof", await chat("proof", buildProofreadMessages(cur, lang), textTokens));
         // Unchanged is the usual answer here, not a refusal.
         const last = info.passes[info.passes.length - 1];
@@ -1694,7 +1724,7 @@ async function wholeRewrite(text, lang, o, chat) {
 
 // The chat request body for one pass, as buildRewriteBody makes it for a passage.
 function buildChatBody(model, messages, temperature, noKwargs) {
-    const body = { model: model || "local-model", messages, temperature, stream: false };
+    const body = { model: model || "local-model", messages: withNoHiddenMarks(messages), temperature, stream: false };
     if (!noKwargs) body.chat_template_kwargs = { enable_thinking: false };
     return body;
 }
@@ -2610,6 +2640,7 @@ if (typeof document !== "undefined") {
         tone: () => $("optTone").value,
         extra: () => $("optExtra").value,
         details: () => $("optDetails").value,
+        plain: () => $("optPlain").checked,
         minLetters: () => { const n = parseInt($("optMin").value, 10); return Number.isFinite(n) && n > 0 ? n : MIN_LETTERS; },
         rate: () => Number($("optRate").value) / 100,
         layout: () => $("optLayout").value,
@@ -2641,7 +2672,7 @@ if (typeof document !== "undefined") {
     // One pass of Rewrite whole text. `maxTokens` bounds the reply in the browser only.
     async function chatOnce(messages, temperature, maxTokens, signal) {
         // @wllama:start
-        if (backendMode === "wllama") return wllamaChat(messages, temperature, maxTokens, signal);
+        if (backendMode === "wllama") return wllamaChat(withNoHiddenMarks(messages), temperature, maxTokens, signal);
         // @wllama:end
         return apiChat(noKwargs => buildChatBody(MODEL_NAME, messages, temperature, noKwargs), signal);
     }
@@ -2724,7 +2755,7 @@ if (typeof document !== "undefined") {
                 text = r.text; marks = r.marks; clean1 = r.report;
             }
             if (whole) {
-                const r = await rewriteWhole(text, marks, docLang, signal, { tone: opt.tone(), extra: opt.extra(), details: opt.details(), clean: opt.clean(), free: mode === "free" });
+                const r = await rewriteWhole(text, marks, docLang, signal, { tone: opt.tone(), extra: opt.extra(), details: opt.details(), clean: opt.clean(), free: mode === "free", plain: opt.plain() });
                 ({ text, marks } = r);
                 reword.whole = r.info;
                 if (r.info.cleanReport) clean2 = r.info.cleanReport;

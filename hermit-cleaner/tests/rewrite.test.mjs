@@ -3,7 +3,7 @@
 import m from "./extract.mjs";
 import { check, section, report } from "./check.mjs";
 
-const { detectLanguage, splitParagraphs, splitSentences, rewordUnits, groupUnits, applyRewrites, pickUnits, mulberry32, buildRewriteMessages, buildRewriteBody,
+const { detectLanguage, splitParagraphs, splitSentences, rewordUnits, groupUnits, applyRewrites, pickUnits, mulberry32, buildRewriteMessages, buildRewriteBody, withNoHiddenMarks, NO_HIDDEN_MARKS,
     stripThinking, acceptRewrite, addTypos, chatErrorHint, normalizeApiUrl, apiEndpoint, buildRewriteSystem, wordDiff, REWORD_LEVELS,
     normalizeGgufUrl, ggufFileName, wllamaMaxTokens, retryNote, MIN_LETTERS } = m;
 
@@ -182,6 +182,12 @@ section("Rewrite request");
     check("thinking off via kwargs", body.chat_template_kwargs && body.chat_template_kwargs.enable_thinking === false);
     check("kwargs dropped on request", !("chat_template_kwargs" in buildRewriteBody("qwen", EN, true, "en")));
     check("placeholder model name", buildRewriteBody("", EN, false).model === "local-model");
+    check("no-hidden-marks line leads the system prompt", body.messages[0].role === "system" && body.messages[0].content.startsWith(NO_HIDDEN_MARKS + "\n\n") && body.messages[0].content.includes("Rewrite the passage freely"));
+    const plain = [{ role: "user", content: "x" }];
+    const marked = withNoHiddenMarks(plain);
+    check("no-hidden-marks: system message added when missing, input untouched", marked.length === 2 && marked[0].content === NO_HIDDEN_MARKS && plain.length === 1);
+    const sys = [{ role: "system", content: "S" }, { role: "user", content: "u" }];
+    check("no-hidden-marks: system copied, not mutated", withNoHiddenMarks(sys)[0].content === NO_HIDDEN_MARKS + "\n\nS" && sys[0].content === "S");
     const ctx = buildRewriteMessages("Second sentence.", "en", "First sentence. Second sentence. Third one.");
     check("context goes into the system message", /context only/.test(ctx[0].content) && ctx[0].content.endsWith("First sentence. Second sentence. Third one."));
     check("the user message holds only the sentence", ctx[ctx.length - 1].content === "Second sentence.");

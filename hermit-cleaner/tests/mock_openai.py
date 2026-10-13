@@ -84,6 +84,9 @@ def make_handler(state):
             paragraph = body["messages"][-1]["content"]
             if mode == "whole":
                 system = body["messages"][0]["content"]
+                # Every prompt starts with the app's NO_HIDDEN_MARKS line; the pass is told by what follows.
+                if system.startswith("Write only plain, visible text."):
+                    system = system.split("\n\n", 1)[-1]
                 content = ("- \"I hope this email finds you well\": stock phrase" if system.startswith("You are a sharp editor")
                            else PREFIX + WHOLE_BODY if system.startswith("You rewrite a text")
                            else "- \"so I went back over the numbers\" -> a tidy transition" if system.startswith("Check this text")

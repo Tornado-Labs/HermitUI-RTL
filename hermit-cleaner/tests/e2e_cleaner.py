@@ -296,10 +296,11 @@ def scenarios(page, port, state, browser_name):
     out = output(page)
     systems = [r["messages"][0]["content"] for r in state.requests]
     check("run finishes", ok and "Done" in page.text_content("#status"), page.text_content("#status"))
-    check("eight passes: the plan after the critique, the filler cut before the proofreading", len(systems) == 8 and systems[1].startswith("You are an editor")
+    check("eight passes: the plan after the critique, the filler cut before the proofreading", len(systems) == 8 and systems[1].split("\n\n", 1)[-1].startswith("You are an editor")
           and "strict editor who cuts AI filler" in systems[6], len(systems))
     check("the rewrite may change the content", "may change the content" in systems[2] and "may change the content" not in systems[0], systems[2][:300])
     check("the fact check allows dropped points", "allowed to change the content" in systems[5], systems[5][:200])
+    check("Short sentences (German) is off by default", not page.is_checked("#optPlain"))
     check("output keeps the frame", out == "Hi Sarah,\n\n" + WHOLE_FIXED + "\n\nBest regards,\nTom\n", repr(out))
     check("report names Rewrite freely", "Rewrite freely:" in page.text_content("#report"), page.text_content("#report"))
 

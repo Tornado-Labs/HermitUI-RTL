@@ -39,13 +39,13 @@ function constDecl(name) {
 }
 
 const CONSTS = ["APP_VERSION", "KEEP_RE", "INVISIBLE_RE", "SPACE_CHARS", "CHAR_MAP", "HOMOGLYPHS", "CHAR_NAMES",
-    "CLEAN_CATEGORIES", "STOPWORDS", "LANGUAGE_NAMES", "KEYBOARD_FOR_LANGUAGE", "CONTRAST_RULES", "REWORD_LEVELS", "REWORD_EXAMPLE_INPUT", "REWORD_TONES", "STOCK_PHRASES", "STOCK_PATTERNS", "CONTRAST_PATTERNS", "MIN_LETTERS", "RETRY_MIN_LETTERS", "PREAMBLE_RE", "KEYBOARDS", "TYPO_WEIGHTS", "TYPO_NAMES", "GERMAN_DETERMINER_RE", "GERMAN_COMMA_WORDS", "LETTER_KINDS", "ABBREVIATIONS", "SALUTATION_RE", "WHOLE_EXAMPLES", "WHOLE_PASSES", "WHOLE_MIN_LETTERS", "STYLE_ONLY_RE", "META_COMMENT_RE", "WHOLE_TELLS", "WHOLE_CONTRASTS", "WHOLE_CONCESSIONS", "WHOLE_TRIPLETS", "FILLER_KEEP_RE"];
+    "CLEAN_CATEGORIES", "STOPWORDS", "LANGUAGE_NAMES", "KEYBOARD_FOR_LANGUAGE", "CONTRAST_RULES", "REWORD_LEVELS", "REWORD_EXAMPLE_INPUT", "REWORD_TONES", "STOCK_PHRASES", "STOCK_PATTERNS", "CONTRAST_PATTERNS", "MIN_LETTERS", "RETRY_MIN_LETTERS", "PREAMBLE_RE", "KEYBOARDS", "TYPO_WEIGHTS", "TYPO_NAMES", "GERMAN_DETERMINER_RE", "GERMAN_COMMA_WORDS", "LETTER_KINDS", "ABBREVIATIONS", "SALUTATION_RE", "WHOLE_EXAMPLES", "WHOLE_PASSES", "WHOLE_MIN_LETTERS", "STYLE_ONLY_RE", "META_COMMENT_RE", "WHOLE_TELLS", "WHOLE_CONTRASTS", "WHOLE_CONCESSIONS", "WHOLE_TRIPLETS", "FILLER_KEEP_RE", "NO_HIDDEN_MARKS"];
 const FUNCS = [
     "charLabel", "transliterate", "homoglyphPositions", "cleanText", "mergeCleanReports", "cleanTotal",
-    "detectLanguage", "splitParagraphs", "isRewritable", "splitSentences", "rewordUnits", "groupUnits", "applyRewrites", "mulberry32", "pickUnits", "phraseListRe", "findContrasts", "stockPhraseRe", "findStockPhrases", "countStockPhrases", "isStockOnly", "deletionRange", "cutStockPhrases", "buildRewriteSystem", "buildRewriteMessages", "buildRewriteBody", "wordDiff",
+    "detectLanguage", "splitParagraphs", "isRewritable", "splitSentences", "rewordUnits", "groupUnits", "applyRewrites", "mulberry32", "pickUnits", "phraseListRe", "findContrasts", "stockPhraseRe", "findStockPhrases", "countStockPhrases", "isStockOnly", "deletionRange", "cutStockPhrases", "buildRewriteSystem", "buildRewriteMessages", "withNoHiddenMarks", "buildRewriteBody", "wordDiff",
     "stripThinking", "acceptRewrite", "addressForms", "retryNote",
     "splitLetterFrame", "wholeLanguage", "wholeWriteIn", "buildCritiqueMessages", "buildWholeRewriteMessages", "buildOutlineMessages", "buildPlanMessages", "buildSlopFindMessages", "cutFillerSentences", "isFirstPerson", "buildSentenceReviewMessages",
-    "buildSentenceFixMessages", "copiedSentences", "wholeSpotNotes", "buildSpotFixMessages", "buildFactCheckMessages", "buildProofreadMessages", "isFactError", "factCheckErrors", "buildFactFixMessages",
+    "buildSentenceFixMessages", "copiedSentences", "wholeSpotNotes", "buildSpotFixMessages", "buildFactCheckMessages", "buildProofreadMessages", "buildPlainMessages", "isFactError", "factCheckErrors", "buildFactFixMessages",
     "acceptWholeRewrite", "missingNumbers", "wholeRewrite", "buildChatBody",
     "keyNeighbors", "protectedRanges", "makeTypo", "addTypos", "shiftMarks",
     "isLocalEndpoint", "apiEndpoint", "normalizeApiUrl", "chatErrorHint", "normalizeGgufUrl", "ggufFileName", "wllamaMaxTokens",
