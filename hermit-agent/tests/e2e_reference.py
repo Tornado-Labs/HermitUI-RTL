@@ -722,7 +722,9 @@ def run_task(page, task, deadline_s, tool_mode="auto"):
     return {**base, "passed": not problems, "detail": "; ".join(problems)}
 
 
-def main():
+def main(all_tasks=None, quick=None, label="success"):
+    """Runs a suite: this file's TASKS, or another script's (e2e_coding.py) through the same runner."""
+    all_tasks, quick = (TASKS, QUICK) if all_tasks is None else (all_tasks, quick or [])
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:9931/v1")
     ap.add_argument("--model", default="")
@@ -736,8 +738,8 @@ def main():
     ap.add_argument("--app", default=str(APP_PATH), help="the built HTML file to test")
     ap.add_argument("--out", default="", help="results JSON (default: tests/results/success-<time>.json)")
     args = ap.parse_args()
-    tasks = [t for t in TASKS if (t["name"] in QUICK if args.quick else not args.only or any(o.strip() and o.strip() in t["name"] for o in args.only.split(",")))]
-    out = pathlib.Path(args.out) if args.out else ROOT / "tests" / "results" / f"success-{datetime.datetime.now():%Y%m%d-%H%M%S}.json"
+    tasks = [t for t in all_tasks if (t["name"] in quick if args.quick else not args.only or any(o.strip() and o.strip() in t["name"] for o in args.only.split(",")))]
+    out = pathlib.Path(args.out) if args.out else ROOT / "tests" / "results" / f"{label}-{datetime.datetime.now():%Y%m%d-%H%M%S}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     results = []
     started = time.time()

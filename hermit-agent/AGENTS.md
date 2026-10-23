@@ -23,6 +23,7 @@ python3 build.py                                   # → dist/hermit-agent-stand
 node tests/run.mjs                                 # unit tests (pure logic)
 ../benchmark/.venv/bin/python tests/e2e_agent.py   # e2e vs. a mock endpoint, Chromium + Firefox
 ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 --runs 3   # real model: success rate (--tool-mode native|text)
+../benchmark/.venv/bin/python tests/e2e_coding.py --base-url http://localhost:9931/v1           # real model: six coding tasks, hidden tests
 ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1           # real model: 20+ steps through outages
 ```
 **Real-model runs scale with the change.** The full suite (24 tasks × 3 runs, ~20 min

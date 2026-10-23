@@ -7,6 +7,7 @@ dependencies to install for the unit half.
 node tests/run.mjs                                              # unit tests (all *.test.mjs)
 python3 build.py && ../benchmark/.venv/bin/python tests/e2e_agent.py [chromium] [firefox] [firefox=/path/to/stock/firefox]
 ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
+../benchmark/.venv/bin/python tests/e2e_coding.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
 ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1 [--runs 5]
 ```
 
@@ -318,6 +319,23 @@ change, about a minute per protocol; the full suite is for bigger ones (AGENTS.m
 `--tool-mode native|text|auto` sets Settings → Actions (Phase 3); with `native` or `text`
 a run fails unless every step used that protocol, and each result records how many
 steps used which.
+
+## Real model, coding — `e2e_coding.py`
+
+Six programming tasks, run by `e2e_reference.py`'s runner (same flags, approvals and
+checks; results in `tests/results/coding-*.json`). Each is checked by hidden tests that
+are stricter than the prompt's own examples: make an uploaded `test_lru.py` pass by
+writing the LRU cache it tests (the test file must stay byte for byte), find two bugs
+across `cart.py` and `pricing.py` from a symptom (a shared mutable default and a discount
+that starts one item too late), make an O(n²) `count_pairs` linear without changing its
+results (checked against the old version on random inputs, then timed on 200,000 numbers
+after a 10,000-number gate, so a still-quadratic version fails in seconds instead of
+hanging the check), add priorities to an existing to-do list (the original tests must
+still pass, and a list saved by the old version must still load), write an expression
+evaluator (run with `eval`, `exec` and `compile` replaced by a function that fails), and
+write tests for an interval `merge()` that catch four planted bugs (mutation testing).
+The three that change an uploaded file must be held for it, as in the reference suite.
+`--quick` runs the bug hunt, the performance fix and the LRU cache.
 
 ## Real model, long run — `e2e_longrun.py`
 
