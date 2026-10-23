@@ -118,14 +118,8 @@ poll with `page.evaluate` instead.
     Qwen3-1.7B at Strong once dropped a "40 %" and turned "Frau Weber" into "Herr Müller".
     Every build also switched a formal German e-mail to "du" now and then (mostly
     Gemma at Medium/Strong), hence the form-of-address rule.
-- **Set-up contrasts, greetings, form of address (v0.3.2).** Learned on 2026-10-10
-  with ChatGPT's AI detector run by hand on texts Qwen3.8-27B wrote (results in
-  `bench/results/20261010-detector/`), then judged by Claude side by side on the small
-  ladder (`bench/results/20261010-claude-judging/`, A = v0.3.1, B = v0.3.2):
-  - The detector is an LLM style review, not a statistic. Once phrases and contrasts
-    are gone it rates on structure, unsourced claims and missing personal detail, which
-    the Cleaner must not change; and it reads grammar errors as human, so a damaged
-    rewrite can score *better*. Never use its score as a quality signal on its own.
+- **Set-up contrasts, greetings, form of address (v0.3.2).** Read side by side on the
+  small ladder (`bench/results/20261010-claude-judging/`, A = v0.3.1, B = v0.3.2):
   - Contrasts (`CONTRAST_PATTERNS`) need both halves, or ordinary text gets flagged.
     Told to drop them, models dodge: "just" -> "only"/"simply", a full stop between
     the halves ("isn't just a cost. It's ..."), no adverb at all ("isn't code; it's

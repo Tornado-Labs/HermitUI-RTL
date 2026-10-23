@@ -4,7 +4,7 @@
 sentences or paragraphs reworded by your own local model (or the whole text rewritten
 in several passes), and a few natural typos.*
 
-> **Status: v0.4.3.** One self-contained HTML file in two flavours:
+> **Status: v0.4.4.** One self-contained HTML file in two flavours:
 > [`dist/hermit-cleaner-standalone.html`](dist/hermit-cleaner-standalone.html) (≈ 380 KB)
 > rewords through a model server, and
 > [`dist/hermit-cleaner-wllama.html`](dist/hermit-cleaner-wllama.html) (≈ 3.6 MB) can also
@@ -174,10 +174,8 @@ The output shows every change: hover a highlight to see what was there before.
   model makes grammar mistakes. Check the highlighted changes before you use them.
   Even a 27B model, rewording German sentence by sentence at Medium, now and then
   turns a sentence's meaning around ("wir bedauern" → "wir sind froh").
-- Rewording removes phrases and framing; it doesn't change what a text says. An AI
-  detector that reads the whole text (ChatGPT's, for one) still points at a textbook
-  structure, claims without sources and missing personal detail, and fixing those
-  means adding content, which the Cleaner never does.
+- **Reword** removes phrases and framing; it doesn't change what a text says or how it
+  is built, and it never adds content.
 - **Rewrite whole text** changes far more than Reword, so it can drop or merge a point
   or shift a meaning, even with its fact checks. Read the result before you use it.
 
@@ -206,8 +204,7 @@ nothing.
   [charismarcom.de](https://www.charismarcom.de/post/typische-ki-formulierungen-vermeiden/),
   [korrektur.de](https://korrektur.de/ki-texte-erkennen-merkmale-checkliste) and
   [urbanstudio.de](https://urbanstudio.de/blog/ki/die-sprache-der-ki/).
-- ChatGPT's [AI detector](https://chatgpt.com/writing/ai-detector/) (October 2026),
-  run by hand on texts a local model wrote, before and after rewording: the set-up
+- Our own reading of texts a local model wrote, before and after rewording: the set-up
   contrasts in both languages, business and letter phrases ("culture of vigilance",
   "strategischer Hebel", "Ihr Vertrauen ist uns sehr wichtig") and essay formulas
   ("This experience taught me that").
