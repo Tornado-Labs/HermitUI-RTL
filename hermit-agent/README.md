@@ -1,11 +1,44 @@
-# HermitUI Agent
+<div align="center">
+  <img width="120" alt="HermitUI logo" src="site/logo.svg" />
+  <h1>HermitUI Agent</h1>
+  <p><i>A supervised agent that writes and runs Python in your browser tab, with your own model.</i></p>
+  <p>
+    <a href="../LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" /></a>
+    <img alt="One HTML file" src="https://img.shields.io/badge/One_HTML_file-11_MB-6f42c1.svg" />
+    <img alt="Python via Pyodide" src="https://img.shields.io/badge/Python-Pyodide_(WebAssembly)-3776ab.svg" />
+  </p>
+  <p>
+    <a href="https://moooff.github.io/HermitUI/hermit-agent/"><b>Project page</b></a> •
+    <a href="#try-it">Try it</a> •
+    <a href="#how-you-supervise-it">Supervision</a> •
+    <a href="#what-it-can-make">Files it makes</a> •
+    <a href="#what-leaves-your-machine">What leaves your machine</a> •
+    <a href="#documents">Documents</a>
+  </p>
+</div>
 
-*A supervised, sandboxed, ephemeral agent that runs entirely in your browser.*
+<div align="center">
+  <a href="https://moooff.github.io/HermitUI/hermit-agent/"><img src="site/demo-data.webp" alt="HermitUI Agent cleans a messy sales CSV, recovers from two failed attempts, and draws a chart of monthly revenue per region" width="880" /></a>
+  <p><i>A real run with Qwen3.8 27B on a local llama.cpp server, sped up by removing the wait. The agent cleans a messy CSV, recovers from its own errors, and saves a chart and an Excel workbook.</i></p>
+</div>
 
-> **Status: v0.3.10** (Phase 3.6, more file tools). One self-contained HTML file,
-> [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (≈ 11 MB,
+<div align="center">
+  <a href="https://moooff.github.io/HermitUI/hermit-agent/dist/hermit-agent-standalone.html">
+    <img src="https://img.shields.io/badge/Open_HermitUI_Agent-1f6feb?style=for-the-badge" alt="Open HermitUI Agent" />
+  </a>
+  <a href="https://moooff.github.io/HermitUI/hermit-agent/">
+    <img src="https://img.shields.io/badge/Project_page_with_videos-6f42c1?style=for-the-badge" alt="Project page with videos" />
+  </a>
+</div>
+
+> **Status: v0.3.11** (Phase 3.6, more file tools). One self-contained HTML file,
+> [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (about 11 MB,
 > Python included). It is developed here, separately from the main app in
 > [`../src/`](../src/), so it can move fast without destabilising HermitUI.
+
+Give it a task, like "clean up these CSVs and chart the monthly totals", "write and test a parser for this log format" or "check this calculation numerically". The agent writes Python, runs it against a virtual file system in the tab, reads the output and decides the next step, until the task is done. It can also search, read, write, edit, move and delete files directly, without Python.
+
+It works with any OpenAI-compatible server: llama.cpp, Ollama, LM Studio, vLLM, or a cloud API if you pick one. Nothing to install, and nothing is stored: close the tab and the workspace disappears.
 
 ## Try it
 
@@ -13,90 +46,68 @@
    example, llama.cpp: `llama-server -m model.gguf --jinja --port 9931`. Any
    OpenAI-compatible cloud API works too, but then the task and what the agent
    prints go to that provider.
-2. Open `dist/hermit-agent-standalone.html`. Double-clicking the file is fine: no
-   server is needed, and Python boots offline in about a second.
-3. Open ⚙️ Settings and set the API Base URL (default `http://localhost:9931/v1`),
-   the model and, if needed, the key. Use **Test Connection** to check them.
+2. Open [`dist/hermit-agent-standalone.html`](https://moooff.github.io/HermitUI/hermit-agent/dist/hermit-agent-standalone.html),
+   or download it and double-click the file. No server is needed for the page itself,
+   and Python boots offline in about a second.
+3. Open Settings and set the API Base URL (default `http://localhost:9931/v1`), the
+   model and, if needed, the key. **Test Connection** checks them.
 4. Drop files into the workspace, describe the task, and press **Start**.
 
-The agent needs a model that can recover from its own errors. The reference tasks
-pass with Qwen3.8-27B at reasoning effort Low (see [ROADMAP.md](ROADMAP.md)).
-Packages such as numpy or pandas load on demand from the pinned Pyodide CDN, so they
-need a connection; the standard library works offline, apart from sqlite3, lzma and ssl,
-which Pyodide ships as separate packages from the same CDN. A package that can't load
-says why. Eleven common pure-Python libraries that Pyodide leaves out ship inside the
-file: openpyxl and XlsxWriter (Excel), python-docx (Word), python-pptx (PowerPoint),
-odfpy (OpenDocument), Markdown, markdownify, tabulate, xmltodict, qrcode and seaborn.
-Those that need no Pyodide package (openpyxl, XlsxWriter, odfpy, Markdown, tabulate,
-xmltodict) work offline too. If the server goes away mid-task, the agent retries for two minutes and
-then pauses: nothing is lost, and Retry carries on where it stopped.
+The agent needs a model that can recover from its own errors. The reference tasks pass with Qwen3.8-27B at reasoning effort Low (see [ROADMAP.md](ROADMAP.md)). If the server drops mid-task, the agent retries for two minutes and then pauses: nothing is lost, and Retry resumes where it stopped.
 
-Agent code runs in a WebAssembly Python inside the tab. Its network access is
-blocked on a **best-effort** basis: 17 known paths are tested and closed (DESIGN
-§10), but it is a denylist, not a guarantee. Don't put secrets in the workspace that
-you couldn't afford to leak.
+## How you supervise it
+
+<div align="center">
+  <img src="site/demo-fix.webp" alt="The agent finds two bugs, its edits to the user's files are held for approval with a diff, and after approval main.py prints the expected totals" width="880" />
+  <p><i>Two bugs in two files. The edits wait for approval, with the diff shown, before they touch the files you uploaded.</i></p>
+</div>
+
+- **Every step is visible:** the model's reasoning, the precise code, the result, the graphs and pictures it created, and a diff of the modified files.
+- **Risky steps wait for you.** Harmless steps run on their own. A step that deletes, overwrites or moves one of your files, or tries to reach the network, stays put until you approve it.
+- **Every step can be undone.** The workspace saves a checkpoint after each step, and you can rewind to any of them.
+- **It can't touch your machine.** Python runs as WebAssembly (Pyodide) in a Web Worker. The agent only sees the in-memory workspace where you put files.
+- **Sessions go where you put them.** Export a whole session (conversation, steps, workspace, checkpoints) to one zip file and import it later to resume or review it. The app itself remembers nothing.
+
+The agent acts through native tool calls (OpenAI `tools`) when the endpoint supports
+them (llama.cpp with `--jinja`, Ollama models with tool support), and through
+```` ```python ```` blocks and file tags in its reply with any other chat model. Settings →
+**Actions** picks one explicitly; a server that refuses tool calls falls back on its own.
+
+## What it can make
+
+Packages like numpy, pandas and matplotlib load on demand from the pinned Pyodide CDN. The standard library works offline, except sqlite3, lzma and ssl, which Pyodide ships as separate packages from the same CDN.
+
+Eleven pure-Python libraries that Pyodide leaves out ship inside the file:
+
+| Format | Library |
+|---|---|
+| Excel | openpyxl, XlsxWriter |
+| Word | python-docx |
+| PowerPoint | python-pptx |
+| OpenDocument | odfpy |
+| Markdown and HTML | Markdown, markdownify |
+| Tables, XML, QR codes | tabulate, xmltodict, qrcode |
+| Charts | seaborn (with matplotlib from the CDN) |
+
+Those that need no Pyodide package (openpyxl, XlsxWriter, odfpy, Markdown, tabulate,
+xmltodict) work offline too.
 
 ## What leaves your machine
 
-There is no telemetry: no analytics, crash reporting or usage pings, and opening the
-standalone file makes no network request at all. Using it sends exactly this:
+There is no telemetry: no analytics, crash reporting, or usage pings, and opening the standalone file makes no network request at all. Using it sends exactly this:
 
-- **To the API Base URL you configured:** the conversation, including what the agent
-  reads from your files and what its code prints, plus the API key. Before the first
-  request (and again when the URL or model changes) the app also asks that server what
-  it supports (`/models`, `/props`, `/api/show`), as does **Test Connection**.
-- **To jsDelivr (`cdn.jsdelivr.net/pyodide/…`):** only when agent code imports a
-  Pyodide package that isn't built into the file, such as numpy or pandas. This is
-  a plain download: jsDelivr sees your IP address and the package name, never the task
-  or your files.
+- **To the API Base URL you configured:** the conversation, including what the agent reads from your files and what its code prints, plus the API key. Before the first request, and again when the URL or model changes, the app also asks that server what it supports (`/models`, `/props`, `/api/show`), as does **Test Connection**.
+- **To jsDelivr (`cdn.jsdelivr.net/pyodide/...`):** only if agent code pulls in a Pyodide package not built into the file, such as numpy or pandas. It's a simple download: jsDelivr sees your IP address and the package name, never the task or your files.
+
+Agent code stays off the network on a best-effort basis: 17 known paths are tested and closed (DESIGN §10), yet it is a denylist, not a guarantee. Don't put secrets in the workspace that you couldn't afford to leak.
 
 The unbuilt `src/index.html` additionally loads its libraries and the Inter font from
 jsDelivr, cdnjs and Google Fonts on every page load, and fetches the Python core and
 the bundled libraries from jsDelivr and PyPI; `dist/` has all of these inlined.
 
-## The idea
-
-You give the agent a task, for example "clean up these CSVs and chart the monthly
-totals", "write and test a parser for this log format" or "check this calculation
-numerically". The agent works through it step by step: it writes Python, runs it
-against a virtual file system, reads the output and decides the next step. Files
-it can also search, read, write, edit, delete and move directly, with file actions
-(`search_files`, `read_file`, `write_file`, `edit_file`, `delete_file`, `move_file`)
-that need no Python and are gated before they apply; a Python file it writes that
-doesn't compile is reported at once. When it needs to ask you something, it can offer
-answers to pick with one click.
-
-The agent acts through **native tool calls** (OpenAI `tools`) when the endpoint says it
-supports them (llama.cpp with `--jinja`, Ollama models with tool support), and through
-```` ```python ```` blocks and file tags in its reply with any other chat model. Settings →
-**Actions** picks one explicitly; a server that refuses tool calls falls back on its own.
-
-What makes it different from CLI agents is that **you can supervise it**:
-
-- **Every step is visible:** the model's reasoning, the exact code, the output, the
-  charts and images it made (inline), and a diff of which files changed.
-- **Risky steps wait for you.** Harmless steps run on their own. Anything that
-  deletes or overwrites your files, or tries to reach the network, is held for
-  approval.
-- **Every step can be undone.** The workspace is checkpointed after each step, and
-  you can rewind to any of them.
-- **It can't touch your machine.** Python runs as WebAssembly (Pyodide) in a Web
-  Worker. The agent only sees the in-memory workspace you put files into, and that
-  workspace is gone when you close the tab.
-- **Sessions go where you put them.** Export a whole session (conversation, steps,
-  workspace, checkpoints) to a single `.zip` and import it later to resume or review.
-  ➕ New can start a clean session on the same workspace files. The app itself still
-  remembers nothing.
-
 ## Relationship to HermitUI
 
-It is the same brand and the same philosophy: a single HTML file, vanilla JS, no
-persistence, any OpenAI-compatible endpoint. It reuses much of HermitUI's proven
-code: streaming, think-tag parsing, settings, error hints and the inline build
-machinery (the list is in [AGENTS.md](AGENTS.md)). It lives in its own folder with
-its own `src/`, `build.py` and `tests/`, and may merge back into HermitUI later as a
-build flavor or a mode.
-See [DESIGN.md §11](DESIGN.md#11-project-layout--merge-path).
+It keeps the same brand and philosophy: one HTML file, vanilla JS, no persistence, and any OpenAI-compatible endpoint. The code reuses a lot of HermitUI's tested parts (streaming, think-tag parsing, settings, error hints, and inline build machinery; the full list is in [AGENTS.md](AGENTS.md)). It sits in its own folder with a separate `src/`, `build.py`, and `tests/`, and could merge back into HermitUI later as a build flavor or mode. Check [DESIGN.md §11](DESIGN.md#11-project-layout--merge-path).
 
 ## Documents
 
@@ -109,3 +120,4 @@ See [DESIGN.md §11](DESIGN.md#11-project-layout--merge-path).
 | [AGENTS.md](AGENTS.md) | Rules for anyone (human or AI) working in this folder, build & test commands |
 | [REVIEW_NOTES.md](REVIEW_NOTES.md) | Open decisions (MVP, Phases 2a, 2b, 3 and 3.5), waiting for a review |
 | [tests/README.md](tests/README.md) | What the unit, end-to-end and real-model tests cover |
+| [index.html](index.html) | The [project page](https://moooff.github.io/HermitUI/hermit-agent/), with the demo videos |

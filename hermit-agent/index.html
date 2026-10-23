@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HermitUI Agent</title>
+<meta name="description" content="An agent that writes and runs Python in your browser tab, with your own model, and asks before it changes your files.">
+<link rel="icon" href="site/logo.svg">
+<meta name="color-scheme" content="dark">
+<style>
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(site/inter-latin.woff2) format("woff2");
+}
+
+:root {
+    --night: #0c1124;
+    --dusk: #1c1a48;
+    --text: #e6e8f2;
+    --muted: #a0a6c0;
+    --faint: rgba(230, 232, 242, 0.1);
+    --blue: #60a5fa;
+    --violet: #8b5cf6;
+    --held: #fbbf24;
+    --code: #141a36;
+    --measure: 40rem;
+    --wide: 74rem;
+    --gutter: clamp(1rem, 4vw, 2.5rem);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    background: var(--night);
+    background-image:
+        radial-gradient(70rem 40rem at 85% -10%, rgba(139, 92, 246, 0.22), transparent 70%),
+        radial-gradient(50rem 30rem at -10% 30%, rgba(96, 165, 250, 0.08), transparent 70%),
+        linear-gradient(180deg, var(--night) 0%, var(--dusk) 140rem, var(--night) 100%);
+    background-repeat: no-repeat;
+    color: var(--text);
+    font: 400 1.0625rem/1.65 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--blue); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+a:hover { color: #93c5fd; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+
+code, kbd {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+}
+
+.wrap { max-width: var(--wide); margin: 0 auto; padding: 0 var(--gutter); }
+.prose { max-width: var(--measure); }
+
+/* Top bar: the one glass surface, as in the app */
+.bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    background: rgba(12, 17, 36, 0.62);
+    border-bottom: 1px solid var(--faint);
+}
+.bar .wrap { display: flex; align-items: center; gap: 1.5rem; min-height: 3.75rem; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 0.6rem; color: var(--text); text-decoration: none; font-weight: 600; letter-spacing: -0.01em; }
+.brand img { width: 1.9rem; height: 1.9rem; }
+.bar nav { margin-left: auto; display: flex; gap: 1.4rem; flex-wrap: wrap; font-size: 0.94rem; }
+.bar nav a { color: var(--muted); text-decoration: none; }
+.bar nav a:hover { color: var(--text); }
+
+/* Hero */
+.hero { padding-top: clamp(3.5rem, 9vw, 7rem); padding-bottom: 2.5rem; }
+h1 {
+    margin: 0;
+    max-width: 15ch;
+    font-size: clamp(2.5rem, 6.4vw, 4.9rem);
+    line-height: 1.02;
+    font-weight: 650;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+}
+.lede { margin: 1.6rem 0 0; font-size: clamp(1.125rem, 1.6vw, 1.3rem); line-height: 1.6; color: #cdd1e4; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.85rem 1.25rem; margin-top: 2.2rem; }
+.btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.9rem;
+    padding: 0 1.3rem;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 1rem;
+    text-decoration: none;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+.btn-primary { background: linear-gradient(90deg, #2563eb, var(--violet)); color: #fff; }
+.btn-primary:hover { color: #fff; background: linear-gradient(90deg, #3b74f0, #9a72f8); }
+.btn-plain { color: var(--text); border: 1px solid rgba(230, 232, 242, 0.22); }
+.btn-plain:hover { color: var(--text); border-color: rgba(230, 232, 242, 0.5); }
+.fineprint { font-size: 0.9rem; color: var(--muted); }
+
+/* Video stage: the one loud element */
+.stage { margin: clamp(2.5rem, 6vw, 4rem) auto 0; max-width: calc(var(--wide) + 6rem); padding: 0 var(--gutter); }
+.screen {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #0b1020;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 2.5rem 7rem -2rem rgba(76, 52, 190, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+    aspect-ratio: 16 / 10;
+}
+.screen video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.toggle {
+    position: absolute;
+    right: 0.9rem;
+    bottom: 0.9rem;
+    min-height: 2.25rem;
+    padding: 0 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(11, 16, 32, 0.72);
+    color: var(--text);
+    font: 500 0.85rem/1 "Inter", system-ui, sans-serif;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+}
+.toggle:hover { border-color: rgba(255, 255, 255, 0.4); }
+
+/* Steps under a video: click to jump there */
+.steps { list-style: none; margin: 1.1rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.steps button {
+    display: flex;
+    gap: 0.55rem;
+    align-items: baseline;
+    min-height: 2.4rem;
+    padding: 0.45rem 0.85rem;
+    border: 1px solid var(--faint);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font: 400 0.92rem/1.35 "Inter", system-ui, sans-serif;
+    text-align: left;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.steps button:hover { color: var(--text); border-color: rgba(230, 232, 242, 0.3); }
+.steps button .n { font-variant-numeric: tabular-nums; color: rgba(160, 166, 192, 0.7); }
+.steps button[aria-current="true"] { color: var(--text); border-color: rgba(96, 165, 250, 0.55); background: rgba(96, 165, 250, 0.08); }
+.steps button.held .n { color: var(--held); }
+.steps button.held[aria-current="true"] { border-color: rgba(251, 191, 36, 0.6); background: rgba(251, 191, 36, 0.08); }
+.caption { margin: 0.9rem 0 0; font-size: 0.9rem; color: var(--muted); }
+
+/* Sections */
+section.wrap { margin-top: clamp(5rem, 11vw, 8.5rem); }
+h2 {
+    margin: 0 0 1.1rem;
+    font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+    line-height: 1.12;
+    font-weight: 620;
+    letter-spacing: -0.03em;
+    max-width: 22ch;
+    text-wrap: balance;
+}
+h3 { margin: 0 0 0.35rem; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; }
+p { margin: 0 0 1rem; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem 4rem; align-items: start; }
+@media (min-width: 60rem) {
+    .split { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); }
+}
+.held-note { border-left: 2px solid var(--held); padding-left: 1rem; color: #e8dcc0; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 2.25rem 3rem; margin: 2.5rem 0 0; }
+.facts div { max-width: 34rem; }
+.facts p { color: #c6cadd; margin: 0; }
+
+.formats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: 0; margin: 2rem 0 0; border-top: 1px solid var(--faint); }
+.formats div { padding: 1rem 1rem 1rem 0; border-bottom: 1px solid var(--faint); }
+.formats dt { font-weight: 600; }
+.formats dd { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.94rem; }
+
+ol.start { list-style: none; counter-reset: s; margin: 2rem 0 0; padding: 0; display: grid; gap: 1.75rem; max-width: var(--measure); }
+ol.start li { counter-increment: s; display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); }
+ol.start li::before { content: counter(s); font-weight: 650; font-size: 1.25rem; line-height: 1.3; color: var(--violet); }
+ol.start p { margin: 0.2rem 0 0; color: #c6cadd; }
+pre {
+    margin: 0.7rem 0 0;
+    padding: 0.85rem 1rem;
+    background: var(--code);
+    border: 1px solid var(--faint);
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.95rem;
+}
+
+footer { margin-top: clamp(5rem, 12vw, 9rem); padding: 2rem 0 3rem; border-top: 1px solid var(--faint); color: var(--muted); font-size: 0.92rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 0.75rem 2rem; justify-content: space-between; }
+footer nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
+footer a { color: var(--muted); }
+footer a:hover { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+    <div class="wrap">
+        <a class="brand" href="./"><img src="site/logo.svg" alt="">HermitUI Agent</a>
+        <nav aria-label="Project">
+            <a href="https://github.com/moooff/HermitUI/tree/main/hermit-agent">Source</a>
+            <a href="https://github.com/moooff/HermitUI/blob/main/hermit-agent/DESIGN.md">Design notes</a>
+            <a href="../">HermitUI chat</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+    <div class="wrap hero">
+        <h1>Hand it files and a task. See every step.</h1>
+        <p class="lede prose">The agent writes Python, runs it inside your browser tab, reads the output, and continues until the task is complete. It uses your own model server, asks before modifying your files, and clears all data when you close the tab.</p>
+        <div class="actions">
+            <a class="btn btn-primary" href="dist/hermit-agent-standalone.html">Open the agent</a>
+            <a class="btn btn-plain" href="dist/hermit-agent-standalone.html" download>Download the file</a>
+            <span class="fineprint">One HTML file, around 11 MB with Python inside.</span>
+        </div>
+    </div>
+
+    <figure class="stage" style="margin-bottom:0">
+        <div class="screen">
+            <video id="v-data" src="site/demo-data.mp4" poster="site/demo-data.jpg" muted loop playsinline preload="metadata" aria-describedby="cap-data"></video>
+            <button class="toggle" type="button" data-video="v-data">Pause</button>
+        </div>
+        <ul class="steps" data-video="v-data" aria-label="Steps in this run"></ul>
+        <figcaption class="caption" id="cap-data">A real run with Qwen3.8 27B on a local llama.cpp server, sped up with the wait cut out.</figcaption>
+    </figure>
+
+    <section class="wrap" id="asks">
+        <div class="split">
+            <div>
+                <h2>It asks before it touches your files</h2>
+                <p>Reading files and writing new ones runs on its own. A step that overwrites, deletes or moves one of your files, or tries to reach the network, stops and shows you what it wants to change and why.</p>
+                <p class="held-note">You approve, reject, or rewind to any earlier step. The workspace is saved after every step, so a bad turn costs nothing.</p>
+            </div>
+            <figure style="margin:0">
+                <div class="screen">
+                    <video id="v-fix" src="site/demo-fix.mp4" poster="site/demo-fix.jpg" muted loop playsinline preload="metadata" aria-describedby="cap-fix"></video>
+                    <button class="toggle" type="button" data-video="v-fix">Pause</button>
+                </div>
+                <ul class="steps" data-video="v-fix" aria-label="Steps in this run"></ul>
+                <figcaption class="caption" id="cap-fix">A real run with Qwen3.8 27B on a local llama.cpp server, sped up with the wait cut out.</figcaption>
+            </figure>
+        </div>
+    </section>
+
+    <section class="wrap" id="where">
+        <h2>Everything happens in the tab</h2>
+        <div class="facts">
+            <div>
+                <h3>Python in WebAssembly</h3>
+                <p>The agent's code runs in Pyodide, a build of CPython for the browser, inside a worker. It sees the files you put in the workspace and nothing else on your computer.</p>
+            </div>
+            <div>
+                <h3>Your model, your server</h3>
+                <p>It works with any OpenAI-compatible endpoint: llama.cpp, Ollama, LM Studio or vLLM on your own machine, or a cloud API if you choose one.</p>
+            </div>
+            <div>
+                <h3>Nothing is kept</h3>
+                <p>No account, no storage, no telemetry. Close the tab and the workspace is gone. To keep a session, export it to a zip file and import it later.</p>
+            </div>
+            <div>
+                <h3>Network blocked, within limits</h3>
+                <p>Agent code stays off the network on a best-effort basis: 17 known ways out are tested and closed. That is a denylist, not a guarantee, so keep real secrets out of the workspace.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="wrap" id="formats">
+        <h2>Files it reads and writes</h2>
+        <p class="prose">pandas, numpy and matplotlib load on first use. Eleven other libraries are built into the file, so documents work without any extra setup.</p>
+        <dl class="formats">
+            <div><dt>Excel</dt><dd>openpyxl, XlsxWriter</dd></div>
+            <div><dt>Word</dt><dd>python-docx</dd></div>
+            <div><dt>PowerPoint</dt><dd>python-pptx</dd></div>
+            <div><dt>OpenDocument</dt><dd>odfpy</dd></div>
+            <div><dt>Charts</dt><dd>matplotlib, seaborn</dd></div>
+            <div><dt>Markdown and HTML</dt><dd>Markdown, markdownify</dd></div>
+            <div><dt>Data</dt><dd>CSV, JSON, SQLite, XML with xmltodict</dd></div>
+            <div><dt>Odds and ends</dt><dd>PDF with matplotlib or PyMuPDF, tabulate, qrcode</dd></div>
+        </dl>
+    </section>
+
+    <section class="wrap" id="start">
+        <h2>Get started</h2>
+        <ol class="start">
+            <li><div>
+                <h3>Start a model server</h3>
+                <p>It must accept requests from a browser. With llama.cpp:</p>
+                <pre><code>llama-server -m model.gguf --jinja --port 9931</code></pre>
+            </div></li>
+            <li><div>
+                <h3>Open the file</h3>
+                <p>Double-clicking it works. Python starts offline in about a second. Set the server address in Settings if it isn't on port 9931.</p>
+            </div></li>
+            <li><div>
+                <h3>Add files and describe the task</h3>
+                <p>Drop files or a folder into the workspace, type what you want done, and press Start.</p>
+            </div></li>
+        </ol>
+        <p class="prose fineprint" style="margin-top:2rem">The model needs to spot and fix its own mistakes. Our test tasks pass with Qwen3.8 27B at reasoning effort Low.</p>
+    </section>
+
+    <section class="wrap" id="leaves">
+        <h2>What leaves your computer</h2>
+        <div class="prose">
+            <p>Opening the file triggers no network request. Your task, the parts of your files the agent reads, and what its code prints go to the model server you set, along with the API key if you set one.</p>
+            <p>Packages like numpy and pandas download from jsDelivr the first time agent code imports them. jsDelivr sees your IP address and the package name, never your task or your files.</p>
+        </div>
+    </section>
+</main>
+
+<footer>
+    <div class="wrap">
+        <span>HermitUI Agent is free software under the AGPL-3.0.</span>
+        <nav aria-label="More">
+            <a href="https://github.com/moooff/HermitUI">GitHub</a>
+            <a href="https://github.com/moooff/HermitUI/blob/main/hermit-agent/README.md">README</a>
+            <a href="../">HermitUI chat</a>
+            <a href="../hermit-cleaner/dist/hermit-cleaner-standalone.html">HermitUI Cleaner</a>
+        </nav>
+    </div>
+</footer>
+
+<script>
+// Chapter lists: [seconds into the video, label, held for approval]
+const CHAPTERS = {
+    "v-data": [[6.5, "Reads sales.csv"], [9.11, "A date format breaks the parser"], [11.85, "Cleans 72 rows down to 68"],
+        [14.0, "Two chart attempts fail"], [17.5, "Saves the chart and the workbook"], [21.17, "Sums it up"], [24.4, "The chart"]],
+    "v-fix": [[5.74, "Reads the three files"], [8.64, "Reproduces it: both carts print 23.0"], [9.9, "Held: edits to cart.py and pricing.py", true],
+        [16.71, "Runs main.py: ana 13.5, ben 8.0"], [18.48, "Explains both bugs"]],
+};
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+for (const video of document.querySelectorAll("video")) {
+    const toggle = document.querySelector(`.toggle[data-video="${video.id}"]`);
+    const list = document.querySelector(`.steps[data-video="${video.id}"]`);
+    const chapters = CHAPTERS[video.id] || [];
+    const buttons = chapters.map(([t, label, held], i) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        if (held) b.classList.add("held");
+        const n = document.createElement("span");
+        n.className = "n";
+        n.textContent = String(i + 1);
+        b.append(n, document.createTextNode(label));
+        b.addEventListener("click", () => { video.currentTime = t; video.play(); });
+        li.append(b);
+        list.append(li);
+        return b;
+    });
+    video.addEventListener("timeupdate", () => {
+        let cur = -1;
+        chapters.forEach(([t], i) => { if (video.currentTime >= t - 0.05) cur = i; });
+        buttons.forEach((b, i) => b.setAttribute("aria-current", String(i === cur)));
+    });
+    const label = () => { toggle.textContent = video.paused ? "Play" : "Pause"; };
+    video.addEventListener("play", label);
+    video.addEventListener("pause", label);
+    toggle.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+    // Play only while on screen, and never on its own when reduced motion is asked for.
+    if (!reduceMotion) {
+        new IntersectionObserver(([e]) => (e.isIntersecting ? video.play().catch(() => {}) : video.pause()), { threshold: 0.35 }).observe(video);
+    }
+    label();
+}
+</script>
+</body>
+</html>
