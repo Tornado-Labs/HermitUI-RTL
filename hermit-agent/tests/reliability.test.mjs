@@ -189,7 +189,15 @@ section("8. Packages: the list, the index, failures");
         check(`${pr}: the list is the environment's last line, after its rules`, at > s.indexOf("Don't install anything") && at > s.indexOf("is killed, and the interpreter restarts") && at < s.indexOf(next) && /listed at the end of this section/.test(s));
     }
     check("…and names examples without a list", X.buildSystemPrompt("").includes("(numpy, pandas, matplotlib") && !X.buildSystemPrompt("").includes("only these packages") && !X.buildSystemPrompt("").includes("listed at the end"));
-    check("HTTP clients are listed, but said not to connect", /no network access[^.]*\(requests and other HTTP clients import, but can't connect\)/.test(p));
+    check("network is off, but the user can allow it for a step", /Network access is off\. A step that connects anywhere is held, and the user may run it again with network allowed for that step only/.test(p) && !/no network access/.test(p));
+    check("…the HTTP clients that work then, urllib and pandas included", /requests, httpx, urllib\.request and pandas\.read_csv\(url\) work then/.test(p));
+    check("…and that only CORS sites can be read", /only sites that allow requests from a browser page \(CORS\) can be read/.test(p));
+    const nf = X.networkFailureHint("requests.exceptions.ConnectionError: ('Connection aborted.', HTTPException('Failed to fetch'))");
+    check("a failed request with network allowed: CORS, and don't retry with another client", /cross-origin requests \(CORS\)/.test(nf) && /Another HTTP client or header won't help/.test(nf), nf);
+    check("…also for sync XHR (open_url) and the urllib handler's own message",
+        !!X.networkFailureHint("NetworkError: Failed to execute 'send' on 'XMLHttpRequest': Failed to load 'https://example.com/'.")
+        && !!X.networkFailureHint("urllib.error.URLError: <urlopen error Failed to load 'https://example.com/'. (the site is unreachable, or it doesn't allow requests from a browser page: CORS)>"));
+    check("…and nothing for an HTTP error status or a clean run", X.networkFailureHint("urllib.error.HTTPError: HTTP Error 404: Not Found") === "" && X.networkFailureHint("200 1920") === "" && X.networkFailureHint(undefined) === "");
 
     const CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
     const off = X.packageFailureMessage({ failed: ["numpy"], errors: ["Failed to load 'x': request failed."], netAttempts: [] }, false, CDN);

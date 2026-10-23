@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.8";
+const APP_VERSION = "0.3.9";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -418,7 +418,8 @@ Rules:
 Environment: Pyodide (CPython 3.13 compiled to WebAssembly) running inside the user's browser.
 - The working directory is /workspace. Files the user gave you are there. Save deliverables there too: the user sees and downloads the files in /workspace.
 - If /workspace has an AGENTS.md file, read it before you start: it holds the project's instructions for agents (conventions, commands, what not to touch). Follow them unless they conflict with the user's task or these rules.
-- The standard library is available, and ${pkgs}. Don't install anything: there is no pip or micropip and no network access, so nothing else can be installed (requests and other HTTP clients import, but can't connect). input() does not work.
+- The standard library is available, and ${pkgs}. Don't install anything: there is no pip or micropip, so nothing else can be installed. input() does not work.
+- Network access is off. A step that connects anywhere is held, and the user may run it again with network allowed for that step only: requests, httpx, urllib.request and pandas.read_csv(url) work then. Even with network allowed, only sites that allow requests from a browser page (CORS) can be read, such as many public APIs and raw.githubusercontent.com; most ordinary web pages fail with "Failed to fetch". Download data in one step and save it to /workspace, so later steps don't need the network again.
 - There are no subprocesses or threads: subprocess, os.system, multiprocessing, threading and concurrent.futures fail. Do the work sequentially, and run tests in-process, e.g. unittest.main(module="test_x", argv=["x"], exit=False).
 - Variables persist between your steps until the interpreter is restarted (you will be told when that happens). A module in /workspace that changed is read again the next time a step imports it, but names imported in an earlier step keep the old code: import again after you change a module.
 - Use a library for common jobs instead of producing a format by hand: pandas for tables, CSV and JSON; openpyxl or xlsxwriter for Excel .xlsx files (pandas read_excel and to_excel work too); odfpy (import odf) for OpenDocument .odt, .ods and .odp (for a table in .ods, pandas is simplest: df.to_excel("x.ods") and pd.read_excel("x.ods"); there is no to_ods or read_ods); python-docx (import docx) for Word .docx; python-pptx (import pptx) for PowerPoint .pptx, charts included; pymupdf (import pymupdf) to create, read and edit PDFs (page.insert_htmlbox lays out HTML with headings and tables; there is no reportlab or fpdf); matplotlib or seaborn for charts, also as PDF pages; markdown to turn Markdown into HTML, markdownify for HTML into Markdown; tabulate for plain-text tables; qrcode for QR codes; Pillow for images; jinja2 for HTML; beautifulsoup4 or lxml to parse HTML and XML, xmltodict to turn XML into dicts; python-dateutil for dates; pyyaml for YAML; sqlite3 for SQL. Don't assemble these file formats by hand.
@@ -2246,6 +2247,15 @@ function moduleNotFoundHint(output, available, bundled, aliases) {
     if (/is included in the Pyodide distribution, but it is not installed|is unvendored from the Python standard library/.test(output) || (bundled || []).includes(top)) return notLoaded;
     if ((available || []).includes(top)) return m[2] ? notLoaded : "";
     return `${top} isn't part of the Pyodide distribution and can't be installed here (no pip, no network). Use the standard library or one of the packages listed in your instructions, or write the code yourself.`;
+}
+
+// A request that failed in a step the user allowed network for. From a browser page the
+// error says only "Failed to fetch", whatever the cause, and the usual one is a site
+// that doesn't allow cross-origin requests (CORS). Without this the model retried the
+// same site with another HTTP client, and every retry was held for approval again.
+function networkFailureHint(output) {
+    if (!/Failed to fetch|NetworkError|Failed to load '|doesn't allow requests from a browser page/.test(String(output || ""))) return "";
+    return "A request failed although network was allowed for this step. From a browser page that usually means the site doesn't allow cross-origin requests (CORS), less often that it is unreachable; the browser doesn't say which. Another HTTP client or header won't help. Sites that allow it include many public APIs and raw.githubusercontent.com; most ordinary web pages don't. Use such a source, or tell the user the site can't be read from here.";
 }
 
 // ---------- Binary files (DESIGN §2.1) ----------
@@ -4470,6 +4480,8 @@ async function executeStep(step, idx, notes) {
         const risk = classifyEffect(effect.diff, origins, { bytesWritten: effect.bytesWritten, netAttempts: step.netAttempts, overLimit: effect.overLimit });
         step.risk = risk;
         if (step.netAttempts.length) step.notes.push("Network access is blocked; these attempts failed: " + step.netAttempts.join(", "));
+        const netHint = allowNetwork ? networkFailureHint(r.output) : "";
+        if (netHint) step.notes.push(netHint);
         // Figures and other binary files: the model is told what they are (it can't see them).
         step.figures = r.figures.filter(f => effect.pending.has(f.path));
         step.notes.push(...binaryFileNotes([...effect.pending].map(([p, h]) => ({ path: p, bytes: WS.blobs.get(h) })), step.figures));

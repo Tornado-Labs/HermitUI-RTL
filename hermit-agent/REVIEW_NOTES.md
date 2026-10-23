@@ -376,6 +376,21 @@ the choices made building it (DESIGN §5.1, §2.3).
 - **The quick selection is unchanged** (5 tasks). The two new tasks are in the full
   suite only.
 
+## Network tasks (v0.3.9, 2026-10-23), decided while building it
+
+- ⭐ **The prompt no longer says "no network access … HTTP clients can't connect".** It
+  replaces the 2026-10-07 decision below: the network is off, a step that connects is
+  held, the user may allow it for that step, and only CORS sites can be read. Measured
+  in headless Chromium against Qwen3.8: the model tried web tasks anyway, so the old
+  line only misinformed it about what happens next.
+- ⭐ **urllib goes through a sync XHR in the harness**, not through the `pyodide-http`
+  package: no extra download at boot, and it also covers `build_opener()`, not just
+  `urlopen`. Headers the browser forbids (`User-Agent`, `Host`, …) are left out.
+- **Not done, for review:** an "allow network for the rest of this task" grant (today
+  every step that connects is held again), and a prompt rule against third-party reader
+  proxies (Qwen reached a no-CORS page through `r.jina.ai` after 9 held retries; the
+  user approved each one, but the URL left through someone else's server).
+
 ## Prompt review (2026-10-07), decided while building it
 
 - ⭐ **HTTP clients stay on the prompt's package list**, with "requests and other HTTP

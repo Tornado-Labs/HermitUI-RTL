@@ -77,6 +77,11 @@ def xhr():
     x.open("GET", "{base}/xhr", False)
     x.send()
 await probe("XMLHttpRequest", xhr)
+# urllib has no sockets here; the harness routes http and https through a sync XHR.
+def urllib_open():
+    import urllib.request
+    urllib.request.urlopen("{base}/urllib")
+await probe("urllib.request.urlopen", urllib_open)
 await probe("WebSocket", lambda: js.WebSocket.new("ws://127.0.0.1:{port}/exfil/ws"))
 await probe("WebSocket via prototype.constructor", lambda: js.WebSocket.prototype.constructor.new("ws://127.0.0.1:{port}/exfil/ws2"))
 await probe("EventSource", lambda: js.EventSource.new("{base}/es"))

@@ -216,6 +216,54 @@ def hermit_figures_end():
     hermit_capture("end")
     return json.dumps({"saved": _fig["saved"], "errors": _fig["errors"]})
 
+# ---- urllib over the browser (DESIGN §10). This CPython has no ssl and no sockets, so
+# urllib had no https handler: urlopen("https://…"), and pandas.read_csv(url) with it,
+# failed with "unknown url type" before reaching the network guard. The step was never
+# held, and allowing network changed nothing. http and https now go through a
+# synchronous XMLHttpRequest, which the guard sees (and blocks) like any other request.
+def _hermit_xhr_open(self, req):
+    import http.client, io, urllib.error, urllib.response
+    from js import XMLHttpRequest
+    from pyodide.ffi import JsException, to_js
+    xhr = XMLHttpRequest.new()
+    try:
+        xhr.open(req.get_method(), req.full_url, False)
+    except JsException as e:
+        raise urllib.error.URLError(str(e).split(": ", 1)[-1])
+    xhr.responseType = "arraybuffer"
+    if isinstance(req.timeout, (int, float)) and req.timeout > 0:
+        xhr.timeout = int(req.timeout * 1000)
+    for name, value in req.header_items():
+        # The browser sets these itself and refuses them from scripts.
+        if name.lower() not in ("host", "user-agent", "content-length", "connection", "accept-encoding"):
+            xhr.setRequestHeader(name, value)
+    data = req.data
+    if data is not None and not isinstance(data, (bytes, bytearray)):
+        data = b"".join(data)
+    try:
+        xhr.send(to_js(bytes(data)) if data is not None else None)
+    except JsException as e:
+        msg = str(e).split(": ", 1)[-1]
+        if "Timeout" in str(e):
+            raise urllib.error.URLError("timed out")
+        raise urllib.error.URLError(msg + " (the site is unreachable, or it doesn't allow requests from a browser page: CORS)")
+    body = xhr.response.to_bytes() if xhr.response else b""
+    raw = str(xhr.getAllResponseHeaders()).replace(chr(13), "")
+    # The browser has already decompressed the body, so these would mislead a reader.
+    keep = [l for l in raw.split(chr(10)) if l.strip() and l.split(":", 1)[0].strip().lower() not in ("content-encoding", "content-length", "transfer-encoding")]
+    headers = http.client.parse_headers(io.BytesIO((chr(10).join(keep) + chr(10) + chr(10)).encode("latin-1", "replace")))
+    resp = urllib.response.addinfourl(io.BytesIO(body), headers, str(xhr.responseURL or req.full_url), int(xhr.status))
+    resp.msg = str(xhr.statusText or "") or http.client.responses.get(int(xhr.status), "")
+    return resp
+
+def _hermit_patch_urllib():
+    import urllib.request as ur
+    ur.HTTPHandler.http_open = _hermit_xhr_open
+    ur.HTTPHandler.https_open = _hermit_xhr_open
+    ur.HTTPHandler.https_request = ur.AbstractHTTPHandler.do_request_
+
+_hermit_patch_urllib()
+
 def hermit_listing():
     out = {}
     for root, dirs, files in os.walk("/workspace"):
