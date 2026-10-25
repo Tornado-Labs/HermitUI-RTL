@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.14";
+const APP_VERSION = "0.3.15";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -59,7 +59,7 @@ const BUNDLED_LIBRARIES = {
 const SESSION_FORMAT = "hermit-agent-session";
 // 2: native tool calls (assistant tool_calls, "tool" messages; Phase 3). 1 still reads.
 const SESSION_FORMAT_VERSION = 2;
-const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3 };
+const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3, compactFocusChars: 300 };
 const THROTTLE_MS = 80;
 
 // ========== 2. Helpers copied from HermitUI ==========
@@ -1253,7 +1253,7 @@ function taskMessageBase(content) {
 // The compacted history keeps the task message verbatim and the steps after cut in full
 // (buildCompactedMessages), so the summary covers neither: what the user said later goes
 // under its own heading, and only the user's own words count as instructions there.
-function buildCompactionRequest(messages, cut) {
+function buildCompactionRequest(messages, cut, focus) {
     const system = `You compress the history of an AI agent's session so the agent can continue its task with less context. The agent solves tasks by writing Python and file actions that run in /workspace. You get the task, the agent's earlier turns (AGENT) and what came back (RESULT: <observation> envelopes, plus notes, answers and follow-ups from the user). The agent keeps the task message word for word, and the turns after these ones follow your summary unchanged.
 
 Write a summary the agent can continue from, under these headings, in this order, in at most 400 words:
@@ -1278,9 +1278,12 @@ If the history starts with an earlier summary, fold it in. Write only the summar
         const m = messages[i];
         parts.push(`--- ${m.role === "assistant" ? "AGENT" : "RESULT"} ---\n` + truncateOutput(m.role === "assistant" ? messageAsText(m) : m.content, 1500, 1500));
     }
+    // A focus the user typed when compacting by hand: what the summary must keep in detail.
+    const f = String(focus || "").replace(/\s+/g, " ").trim().slice(0, LIMITS.compactFocusChars);
+    const ask = f ? `The user asked this summary to focus on: "${f}". Keep everything about that in full detail, under the same headings, even past the word limit.\n\nWrite the summary now.` : "Write the summary now.";
     return [
         { role: "system", content: system },
-        { role: "user", content: parts.join("\n\n") + "\n\nWrite the summary now." },
+        { role: "user", content: parts.join("\n\n") + "\n\n" + ask },
     ];
 }
 
@@ -2877,7 +2880,7 @@ function transcriptMarkdown(session) {
         else if (item.type === "user") md.push(`## ${item.kind === "answer" ? "User answer" : item.kind === "followup" ? "Follow-up" : "User note"}`, ``, item.text, ``);
         else if (item.type === "note") md.push(`> ${String(item.text).replace(/\n/g, "\n> ")}`, ``);
         else if (item.type === "error") md.push(`> **Error:** ${item.text}`, ``);
-        else if (item.type === "compaction") md.push(`## History compacted — steps ${item.fromStep}–${item.toStep}`, ``, `<details><summary>Summary the model continued from</summary>`, ``, item.summary || "", ``, `</details>`, ``);
+        else if (item.type === "compaction") md.push(`## History compacted — steps ${item.fromStep}–${item.toStep}`, ``, ...(item.focus ? [`Focus: ${item.focus}`, ``] : []), `<details><summary>Summary the model continued from</summary>`, ``, item.summary || "", ``, `</details>`, ``);
         else if (item.type === "step") {
             const verdict = item.decision ? ` · ${item.decision}${item.decidedBy ? " by " + item.decidedBy : ""}` : "";
             md.push(`## Step ${item.n} — ${item.kind}${item.status ? " · " + item.status : ""}${verdict}${item.protocol === "tools" ? " · tool call" : ""}`, ``);
@@ -3016,7 +3019,7 @@ function validateSession(raw) {
             case "user": return { type: "user", text: str(it.text), kind: ["guidance", "answer", "followup"].includes(it.kind) ? it.kind : "guidance", ts };
             case "note": return { type: "note", text: str(it.text), tone: ["info", "warn", "error"].includes(it.tone) ? it.tone : "info", ts };
             case "error": return { type: "error", text: str(it.text), hint: str(it.hint), ts };
-            case "compaction": return { type: "compaction", reason: ["overflow", "context", "manual"].includes(it.reason) ? it.reason : "threshold", fromStep: num(it.fromStep, 0), toStep: num(it.toStep, 0), summary: str(it.summary), tokensBefore: num(it.tokensBefore, 0), tokensAfter: num(it.tokensAfter, 0), ts };
+            case "compaction": return { type: "compaction", reason: ["overflow", "context", "manual"].includes(it.reason) ? it.reason : "threshold", fromStep: num(it.fromStep, 0), toStep: num(it.toStep, 0), summary: str(it.summary), tokensBefore: num(it.tokensBefore, 0), tokensAfter: num(it.tokensAfter, 0), ...(str(it.focus) ? { focus: str(it.focus).slice(0, LIMITS.compactFocusChars) } : {}), ts };
             case "step": {
                 const s = { type: "step", n: num(it.n, 0), ts, checkpoint: Number.isInteger(it.checkpoint) ? it.checkpoint : undefined };
                 for (const k of STEP_STRINGS) s[k] = str(it[k]);
@@ -4227,15 +4230,18 @@ function continueAfterLimit(more) {
 
 // The Compact button: summarise the older steps now, between runs. The status comes back
 // as it was; Stop aborts it.
+// 🗜️ Compact: asks what the summary should keep (optional), then compacts.
 async function compactNow() {
     if (RUN.active || !S.task) return;
+    const focus = await confirmDialog("Summarise the older steps for the model now, keeping the last few in full. The timeline keeps everything.", "🗜️ Compact", "", { placeholder: "Optional: what the summary must keep, e.g. \"the column names and the API changes\"" });
+    if (focus === false || RUN.active) return;
     const prev = S.status;
     RUN.active = true;
     RUN.stopRequested = false;
     RUN.activeSince = Date.now();
     setStatus("running");
     try {
-        const r = await compactHistory("manual");
+        const r = await compactHistory("manual", typeof focus === "string" ? focus.trim() : "");
         if (r === "stopped") addNote("⏹ Stopped while compacting the history.");   // a failure adds its own note
         if (r === "unreachable") addNote(`⚠️ Couldn't compact the history: the endpoint didn't answer (${RUN.lastError && RUN.lastError.message}). Nothing changed.`, "warn");
     } finally {
@@ -4614,7 +4620,7 @@ function sendFileListingIfDue(step) {
 // "compacted" | "skipped" (nothing to summarise, or it failed: the history is
 // unchanged) | "unreachable" (the endpoint stayed down through the retries; unchanged
 // too) | "stopped".
-async function compactHistory(reason) {
+async function compactHistory(reason, focus) {
     const force = reason !== "threshold";
     let plan = planCompaction(S.messages, LIMITS.compactKeepSteps, force ? 1 : LIMITS.compactMinSteps);
     for (let keep = LIMITS.compactKeepSteps - 1; !plan && force && keep >= 1; keep--) plan = planCompaction(S.messages, keep, 1);
@@ -4623,10 +4629,10 @@ async function compactHistory(reason) {
     const fromStep = prevTo + 1, toStep = prevTo + plan.steps;
     const tokensBefore = estimateTokens(requestMessages(), RUN.tokenRatio);
     setActivity("compacting");
-    debugLog("model", `→ compacting steps ${fromStep}–${toStep} (${reason}) · ~${tokensBefore} tokens`);
+    debugLog("model", `→ compacting steps ${fromStep}–${toStep} (${reason}${focus ? ", focus: " + focus : ""}) · ~${tokensBefore} tokens`);
     const payload = {
         model: SETTINGS.model || "local-model",
-        messages: buildCompactionRequest(S.messages, plan.cut),
+        messages: buildCompactionRequest(S.messages, plan.cut, focus),
         stream: true,
         stream_options: { include_usage: true },
         ...currentReasoningParams(),
@@ -4666,7 +4672,7 @@ async function compactHistory(reason) {
     S.messages = buildCompactedMessages(S.messages, plan.cut, summary, toStep, files, currentPlan(S.timeline));
     const tokensAfter = estimateTokens(requestMessages(), RUN.tokenRatio);
     debugLog("result", `history compacted · steps ${fromStep}–${toStep} · ~${tokensBefore} → ~${tokensAfter} tokens`, clipForDebug(summary, 4000));
-    addTimelineItem({ type: "compaction", reason, fromStep, toStep, summary, tokensBefore, tokensAfter });
+    addTimelineItem({ type: "compaction", reason, fromStep, toStep, summary, tokensBefore, tokensAfter, ...(focus ? { focus: focus.slice(0, LIMITS.compactFocusChars) } : {}) });
     renderStatusBar();
     return "compacted";
 }
@@ -5583,6 +5589,7 @@ function buildCard(item, idx, old) {
         const k = (v) => (v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(v));
         const why = { overflow: "after the server refused the prompt as too long", context: "after a reply ran out of context", manual: "on request" }[item.reason] || "as it neared the context limit";
         card.appendChild(el("p", "hint", `Steps ${item.fromStep}–${item.toStep} were summarised for the model ${why} (~${k(item.tokensBefore)} → ~${k(item.tokensAfter)} tokens). The timeline keeps the full record, and rewinding to an earlier step restores the full history.`));
+        if (item.focus) card.appendChild(el("p", "hint", "Focus: " + item.focus));
         const d = el("details", "think-block");
         d.appendChild(el("summary", "", "📝 Summary the model continues from"));
         d.appendChild(renderMarkdown(item.summary));
@@ -6028,7 +6035,7 @@ function openModal(id) {
     modalReturnFocus = document.activeElement;
     const m = $(id);
     m.classList.add("active");
-    const first = m.querySelector("input, select, textarea, button");
+    const first = m.querySelector("input:not([hidden]), select, textarea, button:not([hidden])");
     if (first) first.focus();
 }
 function closeModal(id) {
@@ -6036,15 +6043,21 @@ function closeModal(id) {
     if (modalReturnFocus && modalReturnFocus.focus) modalReturnFocus.focus();
 }
 
-// Resolves true (OK), false (Cancel/Escape) or "alt" (the optional third button).
-function confirmDialog(text, okLabel, altLabel) {
+// Resolves true (OK), false (Cancel/Escape) or "alt" (the optional third button). With
+// input ({ placeholder }), a text field is shown and OK (or Enter in it) resolves its text.
+function confirmDialog(text, okLabel, altLabel, input) {
     return new Promise((resolve) => {
         $("confirmText").textContent = text;
+        const field = $("confirmInput");
+        field.hidden = !input;
+        field.value = "";
+        field.placeholder = (input && input.placeholder) || "";
+        field.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); done(field.value); } };
         $("confirmOk").textContent = okLabel || "OK";
         $("confirmAlt").hidden = !altLabel;
         $("confirmAlt").textContent = altLabel || "";
-        const done = (v) => { $("confirmOk").onclick = null; $("confirmCancel").onclick = null; $("confirmAlt").onclick = null; closeModal("confirmModal"); resolve(v); };
-        $("confirmOk").onclick = () => done(true);
+        const done = (v) => { $("confirmOk").onclick = null; $("confirmCancel").onclick = null; $("confirmAlt").onclick = null; field.onkeydown = null; closeModal("confirmModal"); resolve(v); };
+        $("confirmOk").onclick = () => done(input ? field.value : true);
         $("confirmCancel").onclick = () => done(false);
         $("confirmAlt").onclick = () => done("alt");
         openModal("confirmModal");

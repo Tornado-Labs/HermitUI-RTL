@@ -43,7 +43,7 @@
     </div>
     <header class="app-header">
         <div class="brand">
-            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.14</span></h1>
+            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.15</span></h1>
             <span class="model-badge" id="modelBadge">🤖 model</span>
             <span class="local-badge" id="localBadge" hidden>🏠 local</span>
             <span class="protocol-badge" id="protocolBadge">🔧 auto</span>
@@ -211,6 +211,7 @@
     <div class="modal-overlay" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmText">
         <div class="modal">
             <p id="confirmText"></p>
+            <input type="text" id="confirmInput" maxlength="300" hidden aria-labelledby="confirmText">
             <div class="modal-actions">
                 <button type="button" class="cancel-btn" id="confirmCancel">Cancel</button>
                 <button type="button" class="cancel-btn" id="confirmAlt" hidden></button>

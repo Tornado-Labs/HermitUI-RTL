@@ -696,7 +696,11 @@ The step card says it was sent, and the debug console logs it.
   or says to set it.
 - **Compact button** (🗜️, in the composer, between runs once there are at least two
   steps): compacts now (reason `manual`), as far as needed like the fallbacks, and
-  returns to the status it had. Stop aborts it.
+  returns to the status it had. Stop aborts it. *Since v0.3.15* it first asks what the
+  summary must keep (optional, after Claude Code's `/compact <focus>`): the focus, one
+  line of at most 300 characters, is added to the summariser's request ("keep everything
+  about that in full detail, under the same headings"), shown on the 🗜️ card and in the
+  transcript, and exported with the compaction.
 - **Trigger:** before each request, the prompt is estimated as characters times the
   tokens per character the previous request measured (`prompt_tokens` / characters
   sent, or 1/3.5 before the first). It compacts at the threshold if at least 2 steps lie

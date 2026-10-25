@@ -431,6 +431,15 @@ From comparing pi, opencode and Claude Code (opencode's `doom_loop`).
 - **Anything between two steps resets the count**, including compaction, so a note from
   the user always gives the agent a fresh start.
 
+## Compaction with a focus (v0.3.15, 2026-10-24), decided while building it
+
+- ⭐ **Only by hand.** The 🗜️ Compact button asks for an optional focus; automatic
+  compaction has none. Alternative: a standing "compact instructions" setting, as
+  Claude Code reads from CLAUDE.md. The custom instructions setting is close enough, and
+  the agent's `AGENTS.md` isn't read by the summariser.
+- ⭐ **The focus may push the summary past its 400 words**, since the user asked for
+  detail. Alternative: keep the cap and let the focus crowd out other sections.
+
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 
 - ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a

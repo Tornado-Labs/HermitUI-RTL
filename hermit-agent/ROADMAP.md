@@ -486,8 +486,8 @@ A second comparison, with pi (a minimal four-tool harness), opencode and Claude 
 public docs. Each is a small patch release of its own.
 - [x] **The loop guard** (opencode's `doom_loop`; DESIGN §5.8, v0.3.14): the third
       identical action in a row isn't run, a fourth pauses the run.
-- [ ] **Compaction with a focus** (Claude Code's `/compact <focus>`): what the summary
-      should keep, typed when compacting by hand.
+- [x] **Compaction with a focus** (Claude Code's `/compact <focus>`; v0.3.15): what the
+      summary should keep, typed when compacting by hand.
 - [ ] **A compaction thrash guard** (Claude Code stops auto-compacting when the context
       refills right after each summary): pause instead of compacting every step.
 - [ ] **Rewind to the start gives the task back** (opencode's `/undo`): the task text goes

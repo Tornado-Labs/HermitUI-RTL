@@ -196,7 +196,8 @@ it stall, on cue; see its docstring):
    - Under the mock's vLLM-style path (`/vllm/v1`: no `/props`, `max_model_len` and
      `owned_by: "vllm"` in the model list, tool calling not enabled) Test Connection and
      the run find the context size, Auto goes native and falls back to text on vLLM's
-     400, and the 🗜️ Compact button summarises on request and the follow-up carries the
+     400, and the 🗜️ Compact button asks for a focus, summarises on request with that
+     focus in the summariser's request and on the card, and the follow-up carries the
      summary.
    The mock answers the summariser's request with a fixed summary, and counts the
    compacted steps toward its turn index.
