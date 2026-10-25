@@ -740,6 +740,7 @@ def main(all_tasks=None, quick=None, label="success"):
     ap.add_argument("--quick", action="store_true", help="only the QUICK tasks: the check after a small change")
     ap.add_argument("--app", default=str(APP_PATH), help="the built HTML file to test")
     ap.add_argument("--context-size", type=int, default=0, help="Settings → Context size (0: the server's); small values force compaction mid-task")
+    ap.add_argument("--step-limit", type=int, default=0, help="Settings → Step limit (0: the app's default); long tasks such as e2e_app.py may need more")
     ap.add_argument("--out", default="", help="results JSON (default: tests/results/success-<time>.json)")
     args = ap.parse_args()
     tasks = [t for t in all_tasks if (t["name"] in quick if args.quick else not args.only or any(o.strip() and o.strip() in t["name"] for o in args.only.split(",")))]
@@ -760,6 +761,8 @@ def main(all_tasks=None, quick=None, label="success"):
         page.select_option("#settingToolMode", args.tool_mode)
         if args.context_size:
             page.fill("#settingContextSize", str(args.context_size))
+        if args.step_limit:
+            page.fill("#settingStepLimit", str(args.step_limit))
         page.click("#settingSave")
         page.select_option("#effortSelect", args.effort)
         page.select_option("#autonomySelect", "risk")

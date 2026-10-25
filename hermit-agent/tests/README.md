@@ -8,7 +8,7 @@ node tests/run.mjs                                              # unit tests (al
 python3 build.py && ../benchmark/.venv/bin/python tests/e2e_agent.py [chromium] [firefox] [firefox=/path/to/stock/firefox]
 ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
 ../benchmark/.venv/bin/python tests/e2e_coding.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
-../benchmark/.venv/bin/python tests/e2e_app.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text] [--context-size 20000]
+../benchmark/.venv/bin/python tests/e2e_app.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text] [--context-size 20000] [--step-limit 40]
 ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1 [--runs 5]
 ```
 
@@ -407,7 +407,9 @@ passing unit tests of its own; a README with a usage section). The hidden check 
 the package and exercises every rule, round-trips a save, drives the CLI through
 `runpy`, and runs the agent's own tests. With Qwen3.8-27B it takes 10 to 20 steps and
 2 to 7 minutes, so it is where the plan, compaction (`--context-size 20000`) and the
-cost per turn of each protocol show. It has no `--quick` selection.
+cost per turn of each protocol show. It has no `--quick` selection. Small models hit the
+app's 20-step limit on it; `--step-limit 40` (any `e2e_reference.py`-based runner takes
+it) raises Settings → Step limit to tell a slow finish from a stuck run.
 
 ## Real model, long run — `e2e_longrun.py`
 
