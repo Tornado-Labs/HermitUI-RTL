@@ -376,6 +376,24 @@ the choices made building it (DESIGN §5.1, §2.3).
 - **The quick selection is unchanged** (5 tasks). The two new tasks are in the full
   suite only.
 
+## Text encodings (v0.3.12, 2026-10-23), decided while building it
+
+- ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a
+  file that wasn't strict UTF-8 was binary everywhere: a hex dump in the viewer, refused
+  by read_file and edit_file, skipped by search. Now it is text, and writes and edits
+  store it as cp1252 again; a UTF-8 BOM is kept the same way (before, an edit dropped
+  it). Alternative (a): read as cp1252, write UTF-8 — simpler, but it changes a user's
+  file in a way the diff doesn't show, and Excel then shows `GrÃ¼ÃŸe`.
+- ⭐ **An edit cp1252 can't hold is refused, not converted**, naming the characters and
+  how to convert the file in Python. Alternative: convert to UTF-8 on such an edit and
+  say so in the result.
+- ⭐ **The cp1252 guess needs the bytes to look like text** (no undefined cp1252 bytes,
+  < 1 % control characters, < 30 % high bytes past 32 bytes), since cp1252 decodes any
+  byte. A short binary without NUL bytes could still pass as text; real formats (PNG,
+  JPEG, zip, gzip) contain NULs or fail the checks. Other legacy code pages aren't
+  detected.
+- No system-prompt change: the read_file result names the encoding when it matters.
+
 ## Network tasks (v0.3.9, 2026-10-23), decided while building it
 
 - ⭐ **The prompt no longer says "no network access … HTTP clients can't connect".** It

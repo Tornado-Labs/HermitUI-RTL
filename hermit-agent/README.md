@@ -31,12 +31,12 @@
   </a>
 </div>
 
-> **Status: v0.3.11** (Phase 3.6, more file tools). One self-contained HTML file,
+> **Status: v0.3.12** (Phase 3.6, more file tools). One self-contained HTML file,
 > [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (about 11 MB,
 > Python included). It is developed here, separately from the main app in
 > [`../src/`](../src/), so it can move fast without destabilising HermitUI.
 
-Give it a task, like "clean up these CSVs and chart the monthly totals", "write and test a parser for this log format" or "check this calculation numerically". The agent writes Python, runs it against a virtual file system in the tab, reads the output and decides the next step, until the task is done. It can also search, read, write, edit, move and delete files directly, without Python.
+Give it a task, like "clean up these CSVs and chart the monthly totals", "write and test a parser for this log format" or "check this calculation numerically". The agent writes Python, runs it against a virtual file system in the tab, reads the output and decides the next step, until the task is done. It can also search, read, write, edit, move and delete files directly, without Python; a CSV that Excel saved as Windows-1252 stays Windows-1252 when it edits it.
 
 It works with any OpenAI-compatible server: llama.cpp, Ollama, LM Studio, vLLM, or a cloud API if you pick one. Nothing to install, and nothing is stored: close the tab and the workspace disappears.
 

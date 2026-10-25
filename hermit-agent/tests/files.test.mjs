@@ -267,4 +267,52 @@ section("9. Front matter in the file viewer");
     check("an unclosed --- isn't either", same(f("---\nno close\n"), { frontMatter: null, body: "---\nno close\n" }));
 }
 
+section("10. text encodings — Windows-1252 and a UTF-8 BOM are kept");
+{
+    const bytes = (...b) => Uint8Array.from(b);
+    const sameBytes = (a, b) => a && b && a.length === b.length && a.every((x, i) => x === b[i]);
+    const ascii = (s) => [...s].map(c => c.charCodeAt(0));
+    // "Name;Grüße\nMüller;5 €\n" as Excel writes it on a German Windows.
+    const cp = bytes(...ascii("Name;Gr"), 0xFC, 0xDF, ...ascii("e\nM"), 0xFC, ...ascii("ller;5 "), 0x80, 0x0A);
+    let d = X.decodeText(cp);
+    check("cp1252 is text, not binary", d && d.encoding === "cp1252" && d.text === "Name;Grüße\nMüller;5 €\n", JSON.stringify(d));
+    check("decodeTextFile agrees", X.decodeTextFile(cp) === "Name;Grüße\nMüller;5 €\n");
+    d = X.decodeText(bytes(0xEF, 0xBB, 0xBF, ...ascii("a\n")));
+    check("a UTF-8 BOM is named, and isn't part of the text", d.encoding === "utf-8-bom" && d.text === "a\n", JSON.stringify(d));
+    check("plain UTF-8", X.decodeText(enc.encode("Grüße")).encoding === "utf-8");
+    check("NUL bytes are binary", X.decodeText(bytes(...ascii("ab"), 0, 0xFC)) === null);
+    check("a byte cp1252 leaves undefined is binary", X.decodeText(bytes(...ascii("abc"), 0x81)) === null);
+    check("mostly high bytes are binary", X.decodeText(Uint8Array.from({ length: 64 }, (_, i) => (i % 2 ? 0xFC : 0xC3))) === null);
+    check("…but a short word is text", X.decodeText(bytes(0x47, 0x72, 0xF6, 0xDF, 0x65)).text === "Größe");
+    check("many control characters are binary", X.decodeText(bytes(...ascii("abcdef"), 0x01, 0x02, 0x03, 0xFC)) === null);
+    const all = Uint8Array.from({ length: 128 }, (_, i) => 0x80 + i).filter(b => ![0x81, 0x8D, 0x8F, 0x90, 0x9D].includes(b));
+    const round = X.encodeTextFile(new TextDecoder("windows-1252").decode(all), "cp1252");
+    check("every defined cp1252 byte round-trips", sameBytes(round.bytes, all));
+    const bad = X.encodeTextFile("a → b → c 😀", "cp1252");
+    check("characters cp1252 lacks are named once each", !bad.bytes && bad.bad.length === 2 && bad.bad[0] === "→", JSON.stringify(bad.bad));
+    check("utf-8-bom encodes with its BOM", sameBytes(X.encodeTextFile("a", "utf-8-bom").bytes, bytes(0xEF, 0xBB, 0xBF, 0x61)));
+
+    const files = { "de.csv": cp, "bom.txt": bytes(0xEF, 0xBB, 0xBF, ...ascii("one\ntwo\n")), "plain.txt": "x\n" };
+    let r = run(`<read_file path="de.csv"/>`, files);
+    check("read: the text, and the encoding for python", r.results[0].ok && r.results[0].output === "1\tName;Grüße\n2\tMüller;5 €"
+        && /Windows-1252/.test(r.results[0].message) && /encoding="cp1252"/.test(r.results[0].message), r.results[0].message);
+    r = run(`<edit_file path="de.csv"><old>5 €</old><new>7 €</new></edit_file>`, files);
+    const want = Uint8Array.from(cp, b => (b === 0x35 ? 0x37 : b));
+    check("edit keeps cp1252", r.results[0].ok && r.encodings.get("de.csv") === "cp1252" && sameBytes(X.encodeTextFile(r.writes.get("de.csv"), "cp1252").bytes, want), r.results[0].message);
+    r = run(`<edit_file path="de.csv"><old>5 €</old><new>5 € → 6 €</new></edit_file>`, files);
+    check("an edit cp1252 can't hold is refused, naming the character", r.failed && !r.writes.size && /Windows-1252/.test(r.results[0].message) && r.results[0].message.includes('"→"'), r.results[0].message);
+    r = run(`<write_file path="de.csv">\nName;Grüße\n</write_file>`, files);
+    check("replacing a cp1252 file keeps cp1252", r.results[0].ok && r.encodings.get("de.csv") === "cp1252" && /Windows-1252 as before/.test(r.results[0].message), r.results[0].message);
+    r = run(`<write_file path="new.csv">\nGrüße → x\n</write_file>`, files);
+    check("a new file is UTF-8", r.results[0].ok && !r.encodings.has("new.csv"));
+    r = run(`<edit_file path="bom.txt"><old>two</old><new>2</new></edit_file>`, files);
+    check("an edit keeps a UTF-8 BOM", r.encodings.get("bom.txt") === "utf-8-bom" && r.writes.get("bom.txt") === "one\n2\n");
+    r = run(`<edit_file path="plain.txt"><old>x</old><new>y</new></edit_file>`, files);
+    check("plain UTF-8 needs no entry", r.results[0].ok && r.encodings.size === 0);
+    r = run(`<search_files pattern="Grüße"/>`, files);
+    check("search finds text in a cp1252 file", r.results[0].ok && r.results[0].output.includes("de.csv:1: Name;Grüße"), r.results[0].output);
+    r = run(`<move_file path="de.csv" new_path="data/de.csv"/>\n<edit_file path="data/de.csv"><old>Name</old><new>Wer</new></edit_file>`, files);
+    check("moved, then edited: still cp1252", r.results.every(x => x.ok) && r.encodings.get("data/de.csv") === "cp1252", JSON.stringify(r.results.map(x => x.message)));
+}
+
 report();

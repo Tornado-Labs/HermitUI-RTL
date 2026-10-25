@@ -515,6 +515,19 @@ replacement
   Python handles those; the refusal says what the file is (`binarySummary`: "PNG
   image, 640×480 px, RGBA, 18 KB"). File-step output skips the §5.2 truncation, because the reads
   are already capped.
+- **Text encodings** (`decodeText`, `encodeTextFile`; added in v0.3.12): a file is text
+  in UTF-8, UTF-8 with a BOM, or Windows-1252 (cp1252, which Excel and older Windows
+  tools write in Western Europe, e.g. a German `Grüße` CSV). NUL bytes always mean
+  binary; a file that isn't UTF-8 counts as cp1252 only if it also looks like text (none
+  of the five bytes cp1252 leaves undefined, under 1 % control characters, and under
+  30 % high bytes once it's past 32 bytes). Reads, searches, the viewer and diffs see the
+  text. A write or edit keeps the file's encoding (a BOM included); a new file is UTF-8.
+  An edit or write that adds a character cp1252 can't hold (such as `→`; typographic
+  quotes, dashes and `€` are in cp1252) is refused, naming the characters, with how to
+  convert the file with Python instead: converting silently would change a user's file
+  in a way the diff doesn't show. A read of a cp1252 file tells the model to open it
+  with `encoding="cp1252"` in Python. Other legacy encodings (cp1250, Shift-JIS, …) are
+  still treated as cp1252 or binary.
 - Gating is in §2.3.
 
 *Added in Phase 3.6:* three more file actions, and a syntax check.

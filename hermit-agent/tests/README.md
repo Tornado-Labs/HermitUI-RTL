@@ -110,6 +110,11 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
     - all-or-nothing batches.
   - `formatFileResults`, `buildObservation` with `truncate: false`, `fileActions` in
     `validateSession` and the transcript.
+  - Text encodings (`decodeText`, `encodeTextFile`): UTF-8, a UTF-8 BOM and
+    Windows-1252 read as text, binaries (NUL bytes, undefined cp1252 bytes, mostly high
+    bytes past 32 bytes, control characters) don't; every cp1252 byte round-trips; read,
+    search, edit, write and move-then-edit keep a file's encoding, and an edit cp1252
+    can't hold is refused, naming the characters.
 
 - **`filetools.test.mjs`** covers Phase 3.6 (DESIGN §5.1): the `search_files`,
   `delete_file` and `move_file` tags (quoted `>` in a pattern, a trailing `/`, the whole
@@ -272,6 +277,10 @@ it stall, on cue; see its docstring):
     count, a caret and its content growing in the same card; a `run_python` step that
     prints, then busy-waits, shows the first line in the card while it still runs; the
     finished step keeps the full output, and no live state reaches the session.
+22. **Text encodings** (`encoding`): a Windows-1252 CSV uploaded in a zip is read as
+    text (with the encoding named for Python), edited, refused an arrow it can't hold,
+    read back by Python with `encoding="cp1252"`, still cp1252 byte for byte, and shown
+    as text in the viewer, which names the encoding.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters

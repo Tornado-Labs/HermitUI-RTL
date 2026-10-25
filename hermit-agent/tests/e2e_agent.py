@@ -277,6 +277,13 @@ plt.figure(); plt.plot([1, 1])
             final('<edit_file path="app.py">\n<old>\n    return \\"Hey, \\" + name\n</old>\n<new>\n    return \\"Hey there, \\" + name\n</new>\n</edit_file>'),
             final("Done."),
         ],
+        "E2E-ENCODING": [
+            final('<read_file path="de.csv"/>'),
+            final('<edit_file path="de.csv">\n<old>5 €</old>\n<new>7 €</new>\n</edit_file>'),
+            final('<edit_file path="de.csv">\n<old>7 €</old>\n<new>7 € → 8 €</new>\n</edit_file>'),
+            py('print(repr(open("de.csv", encoding="cp1252").read()))'),
+            final("Done."),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -1799,6 +1806,33 @@ def edit_fix_scenario(browser, port, state):
     page.context.close()
 
 
+DE_CSV = "Name;Grüße\nMüller;5 €\n".encode("cp1252")
+
+
+def encoding_scenario(browser, port, state):
+    print("— a Windows-1252 file: read, edited and kept in its encoding")
+    page = open_app(browser)
+    configure(page, port, 10)
+    page.select_option("#autonomySelect", "autopilot")
+    page.set_input_files("#wsZipInput", files=[zip_payload("de.zip", {"de.csv": DE_CSV})])
+    wait_until(page, "() => WS.files.has('de.csv')", 10, "zip upload")
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-ENCODING: fix the amount")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "final")
+    m = [r["messages"][-1]["content"] for r in state.requests[n0:]]
+    check("read_file shows the text, names the encoding", "1\tName;Grüße\n2\tMüller;5 €" in m[1] and 'encoding="cp1252"' in m[1], m[1])
+    check("…the edit applies", "[1] edit_file de.csv: edited (1 change)" in m[2], m[2])
+    check("…a character cp1252 lacks is refused, by name", 'Windows-1252 file, which can\'t hold "→"' in m[3], m[3])
+    check("…python reads the edited file as cp1252", "'Name;Grüße\\nMüller;7 €\\n'" in m[4], m[4])
+    stored = bytes(page.evaluate("() => [...WS.blobs.get(WS.files.get('de.csv').hash)]"))
+    check("the file is still Windows-1252", stored == "Name;Grüße\nMüller;7 €\n".encode("cp1252"), repr(stored))
+    page.locator('#wsTree [data-action=view-file][data-path="de.csv"]').click()
+    wait_until(page, "() => /Windows-1252/.test(document.getElementById('viewerMeta').textContent)", 10, "viewer names the encoding")
+    check("the viewer shows the text, not a hex dump", "Müller;7 €" in page.inner_text("#viewerBody"), page.inner_text("#viewerBody")[:200])
+    page.context.close()
+
+
 MD_REPORT = """# Report
 
 Some **bold** text.
@@ -1918,7 +1952,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

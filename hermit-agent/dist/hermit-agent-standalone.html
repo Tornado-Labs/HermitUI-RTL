@@ -2410,7 +2410,7 @@ pre.live-output { border-color: var(--primary); }
     </div>
     <header class="app-header">
         <div class="brand">
-            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.11</span></h1>
+            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.12</span></h1>
             <span class="model-badge" id="modelBadge">🤖 model</span>
             <span class="local-badge" id="localBadge" hidden>🏠 local</span>
             <span class="protocol-badge" id="protocolBadge">🔧 auto</span>
@@ -3199,7 +3199,7 @@ def hermit_clear_workspace():
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.11";
+const APP_VERSION = "0.3.12";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -4591,10 +4591,66 @@ function extractFileActions(text) {
     return { actions, rest, unclosed };
 }
 
-// Text content of a file, or null for binary (NUL bytes or invalid UTF-8).
-function decodeTextFile(bytes) {
+// A file's text and the encoding it is in (DESIGN §5.1): { text, encoding } with
+// encoding "utf-8", "utf-8-bom" (the BOM isn't part of text) or "cp1252" (Windows-1252,
+// what Excel and older Windows tools write in Western Europe; a superset of Latin-1's
+// printable characters), or null for binary. NUL bytes always mean binary: cp1252
+// decodes any byte, so for a file that isn't UTF-8 the bytes must also look like text —
+// none of the five cp1252 leaves undefined, few control characters, and mostly ASCII.
+function decodeText(bytes) {
     if (!bytes || bytes.includes(0)) return null;
-    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (e) { return null; }
+    try {
+        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+        return text.charCodeAt(0) === 0xFEFF ? { text: text.slice(1), encoding: "utf-8-bom" } : { text, encoding: "utf-8" };
+    } catch (e) { /* not UTF-8 */ }
+    let controls = 0, high = 0;
+    for (const b of bytes) {
+        if (b >= 0x80) {
+            if (b === 0x81 || b === 0x8D || b === 0x8F || b === 0x90 || b === 0x9D) return null;
+            high++;
+        } else if ((b < 0x20 && b !== 9 && b !== 10 && b !== 12 && b !== 13) || b === 0x7F) controls++;
+    }
+    // The share of high bytes only says something past a few words ("Größe" is 40 %).
+    if (controls > bytes.length / 100 || (bytes.length > 32 && high > bytes.length * 0.3)) return null;
+    return { text: new TextDecoder("windows-1252").decode(bytes), encoding: "cp1252" };
+}
+
+// Text content of a file, or null for binary (decodeText).
+function decodeTextFile(bytes) {
+    const d = decodeText(bytes);
+    return d ? d.text : null;
+}
+
+// How the model and the user are told about an encoding: "" for plain UTF-8.
+function encodingLabel(encoding) {
+    return encoding === "cp1252" ? "Windows-1252" : encoding === "utf-8-bom" ? "UTF-8 with BOM" : "";
+}
+
+// cp1252's bytes 0x80–0xFF by character: 0x80–0x9F hold typographic characters (€, „,
+// –, …), 0xA0–0xFF are Latin-1's.
+const CP1252_HIGH = new Map([...new TextDecoder("windows-1252").decode(Uint8Array.from({ length: 128 }, (_, i) => 0x80 + i))].map((c, i) => [c, 0x80 + i]));
+
+// Text as bytes in a file's encoding (decodeText): { bytes }, or { bad: [characters
+// the encoding can't hold] } (at most 10, each once) for cp1252.
+function encodeTextFile(text, encoding) {
+    const utf8 = new TextEncoder().encode(text);
+    if (encoding === "utf-8-bom") {
+        const out = new Uint8Array(utf8.length + 3);
+        out.set([0xEF, 0xBB, 0xBF]);
+        out.set(utf8, 3);
+        return { bytes: out };
+    }
+    if (encoding !== "cp1252") return { bytes: utf8 };
+    const out = new Uint8Array(text.length);
+    const bad = [];
+    let n = 0;
+    for (const c of text) {
+        const code = c.codePointAt(0);
+        const b = code < 0x80 ? code : CP1252_HIGH.get(c);
+        if (b !== undefined) out[n++] = b;
+        else if (!bad.includes(c) && bad.length < 10) bad.push(c);
+    }
+    return bad.length ? { bad } : { bytes: out.subarray(0, n) };
 }
 
 function countOccurrences(hay, needle) {
@@ -4736,10 +4792,11 @@ function closestExcerpt(text, oldT, opts) {
 // the model is told which one failed. Returns { results: [{ tool, path, ok, message,
 // output?, startLine?, endLine?, edits?, newPath?, query? }], writes: Map(path -> text,
 // or the Uint8Array of a moved file), deletes: [paths of ws files that go], moves:
-// [[from, to]] per file moved, failed }.
+// [[from, to]] per file moved, encodings: Map(path -> encoding) for the written texts
+// that aren't plain UTF-8 (a file keeps the encoding it had, decodeText), failed }.
 function applyFileActions(actions, ws, opts) {
     const lim = { ...LIMITS, ...(opts || {}) };
-    const overlay = new Map();   // path -> { text } | { bytes } | null (deleted)
+    const overlay = new Map();   // path -> { text, encoding } | { bytes } | null (deleted)
     const paths = new Set(ws.paths || []);
     const results = [];
     const moves = [];
@@ -4752,21 +4809,25 @@ function applyFileActions(actions, ws, opts) {
     };
     const under = (dir) => allPaths().filter(p => p.startsWith(dir + "/"));
     const rawBytes = (p) => {
-        if (overlay.has(p)) { const v = overlay.get(p); return v === null ? null : v.bytes || new TextEncoder().encode(v.text); }
+        if (overlay.has(p)) { const v = overlay.get(p); return v === null ? null : v.bytes || encodeTextFile(v.text, v.encoding).bytes; }
         return paths.has(p) ? ws.read(p) : null;
     };
     const current = (p) => {
         if (overlay.has(p)) {
             const v = overlay.get(p);
             if (v === null) return null;
-            if (v.text !== undefined) return { text: v.text };
-            const text = decodeTextFile(v.bytes);
-            return text === null ? { binary: v.bytes } : { text };
+            if (v.text !== undefined) return { text: v.text, encoding: v.encoding };
+            return decodeText(v.bytes) || { binary: v.bytes };
         }
         const bytes = paths.has(p) ? ws.read(p) : null;
         if (!bytes) return null;
-        const text = decodeTextFile(bytes);
-        return text === null ? { binary: bytes } : { text };
+        return decodeText(bytes) || { binary: bytes };
+    };
+    // Why text can't be saved in a file's encoding, or "".
+    const unencodable = (p, text, encoding) => {
+        const { bad } = encodeTextFile(text, encoding);
+        if (!bad) return "";
+        return `${p} is a ${encodingLabel(encoding)} file, which can't hold ${bad.map(c => JSON.stringify(c)).join(", ")}. Write them another way (Western European letters, €, typographic quotes and dashes are fine), or convert the file to UTF-8 first with python (open(path, encoding="cp1252").read(), then write it with encoding="utf-8").`;
     };
     // Can a file go at p? "" when it can, else why not (a folder is there, or a file
     // where one of its folders would be).
@@ -4941,7 +5002,7 @@ function applyFileActions(actions, ws, opts) {
             r.ok = true;
             r.startLine = start;
             r.endLine = last;
-            r.message = `lines ${start}–${last} of ${total}`;
+            r.message = `lines ${start}–${last} of ${total}` + (cur.encoding === "cp1252" ? "; Windows-1252, not UTF-8: in python open it with encoding=\"cp1252\"" : "");
             r.output = out.join("\n") + (last < want || (!a.args.end_line && last < total) ? `\n[… ${total} lines in total; continue with start="${last + 1}" …]` : "");
             continue;
         }
@@ -4949,11 +5010,16 @@ function applyFileActions(actions, ws, opts) {
             const content = String(a.args.content ?? "");
             const why = blocked(path);
             if (why) { fail(why); continue; }
+            // Replacing a text file keeps its encoding; anything else is written as UTF-8.
+            const encoding = cur && cur.encoding || "utf-8";
+            if (cur && cur.text === content) { r.ok = true; r.message = "unchanged (same content)"; continue; }
+            const cannot = unencodable(path, content, encoding);
+            if (cannot) { fail(cannot); continue; }
             r.ok = true;
-            if (cur && cur.text === content) { r.message = "unchanged (same content)"; continue; }
-            overlay.set(path, { text: content });
-            const size = formatBytes(new TextEncoder().encode(content).length);
-            r.message = `${cur ? "replaced" : "created"} (${lineCount(content)} line${lineCount(content) === 1 ? "" : "s"}, ${size})`;
+            overlay.set(path, { text: content, encoding });
+            const size = formatBytes(encodeTextFile(content, encoding).bytes.length);
+            const kept = encodingLabel(encoding) ? `, ${encodingLabel(encoding)} as before` : "";
+            r.message = `${cur ? "replaced" : "created"} (${lineCount(content)} line${lineCount(content) === 1 ? "" : "s"}, ${size}${kept})`;
             continue;
         }
         // edit_file
@@ -5013,20 +5079,23 @@ function applyFileActions(actions, ws, opts) {
             fail(r.parts.map(p => p.text).join("\n"));
             continue;
         }
-        overlay.set(path, { text });
+        const cannot = unencodable(path, text, cur.encoding);
+        if (cannot) { fail(cannot); continue; }
+        overlay.set(path, { text, encoding: cur.encoding });
         r.ok = true;
         r.message = `edited (${edits.length} change${edits.length === 1 ? "" : "s"}${relaxed.length ? "; " + relaxed.join(", ") + ". Next time copy <old> exactly from read_file" : ""})`;
     }
-    if (failed) return { results, writes: new Map(), deletes: [], moves: [], failed };
-    const writes = new Map(), deletes = [];
+    if (failed) return { results, writes: new Map(), deletes: [], moves: [], encodings: new Map(), failed };
+    const writes = new Map(), deletes = [], encodings = new Map();
     for (const [p, v] of overlay) {
         if (v === null) { if (paths.has(p)) deletes.push(p); }
         else writes.set(p, v.text !== undefined ? v.text : v.bytes);
+        if (v && v.text !== undefined && v.encoding !== "utf-8") encodings.set(p, v.encoding);
     }
     // A move whose source a later action recreated, or whose target a later action
     // deleted, isn't a move in the result.
     const kept = moves.filter(([from, to]) => overlay.get(from) === null && overlay.get(to) !== null);
-    return { results, writes, deletes: deletes.sort(), moves: kept, failed };
+    return { results, writes, deletes: deletes.sort(), moves: kept, encodings, failed };
 }
 
 // The worker's syntax check (checkPythonSyntax), validated like every worker message:
@@ -7743,12 +7812,11 @@ async function executeFileStep(step, idx, actions, notes) {
     const origins = {};
     for (const [p, f] of WS.files) origins[p] = f.origin;
     if (applied.writes.size || applied.deletes.length) {
-        const enc = new TextEncoder();
         const listing = {}, files = {};
         for (const [p, f] of WS.files) listing[p] = f.hash;
         for (const p of applied.deletes) delete listing[p];
         for (const [p, v] of applied.writes) {
-            files[p] = typeof v === "string" ? enc.encode(v) : v;   // bytes: a moved file
+            files[p] = typeof v === "string" ? encodeTextFile(v, applied.encodings.get(p)).bytes : v;   // bytes: a moved file
             listing[p] = await sha256Hex(files[p]);
         }
         effect = await collectEffect({ listing, files });
@@ -8729,7 +8797,9 @@ function openViewer(path, hash, prevHash) {
     $("viewerDownload").disabled = false;
     $("viewerDownload").onclick = () => downloadBytes(bytes, path.split("/").pop());
     const f = WS.files.get(path);
-    const kind = cachedBinarySummary(hash) || formatBytes(bytes.length);
+    const binary = cachedBinarySummary(hash);
+    const encoding = binary ? "" : encodingLabel((decodeText(bytes) || {}).encoding);
+    const kind = binary || formatBytes(bytes.length) + (encoding ? " · " + encoding : "");
     const meta = `${kind}${f && f.hash === hash ? " · " + (f.origin === "user" ? "your file" : "created by the agent") : " · an earlier version"}`;
     $("viewerMeta").textContent = meta;
     const prev = prevHash ? WS.blobs.get(prevHash) : null;
@@ -8842,7 +8912,8 @@ function renderBinaryChange(path, before, after) {
             img.alt = `${path} (${label.toLowerCase()})`;
             side.appendChild(img);
         }
-        side.appendChild(el("p", "hint", decodeTextFile(bytes) === null ? binarySummary(bytes) : `text, ${formatBytes(bytes.length)}`));
+        const d = decodeText(bytes);
+        side.appendChild(el("p", "hint", d ? ["text", encodingLabel(d.encoding), formatBytes(bytes.length)].filter(Boolean).join(", ") : binarySummary(bytes)));
         wrap.appendChild(side);
     }
     if (before.length === after.length && before.every((x, i) => x === after[i])) wrap.appendChild(el("p", "hint", "Both versions are identical."));
