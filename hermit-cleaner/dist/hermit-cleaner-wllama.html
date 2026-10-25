@@ -831,7 +831,7 @@ body.is-running .options {
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.4.4";
+const APP_VERSION = "0.4.5";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -2017,10 +2017,14 @@ const WHOLE_PASSES = [
     { id: "spots", label: "fixing contrasts and stock phrases", temperature: 0.5 },
     // Rewrite freely only: the filler sentences the later passes put back, cut.
     { id: "slop", label: "finding filler sentences", temperature: 0.2, notes: true },
-    // Plainer only. German: the text again in plain spoken German.
-    { id: "plain", label: "writing short sentences", temperature: 0.6 },
-    // English: one edit of one kind per pass (WHOLE_PLAIN_EN), each with a little
-    // thinking.
+    // Plainer only. German: everyday words, then each long sentence split on its own,
+    // then a row of sentences opening alike reworded (buildPlainRuleMessages).
+    { id: "words", label: "using everyday words", temperature: 0.5 },
+    { id: "split", label: "splitting long sentences", temperature: 0.3 },
+    { id: "openers", label: "varying sentence openings", temperature: 0.4 },
+    // English: what kind of text it is (TEXT_KINDS), for the speaker pass; then one edit
+    // of one kind per pass (WHOLE_PLAIN_EN), each with a little thinking.
+    { id: "kind", label: "reading what kind of text it is", temperature: 0, notes: true },
     { id: "verdicts", label: "cutting verdicts and set-ups", temperature: 0.5 },
     { id: "objections", label: "reporting objections plainly", temperature: 0.5 },
     { id: "everyday", label: "using everyday words", temperature: 0.5 },
@@ -2068,7 +2072,8 @@ function buildPlanMessages(text, lang, critique, letter) {
             + "Plan the content changes as short bullets:\n"
             + (letter ? "- what to cut: empty courtesy, repeated assurances, filler (every request, promise, date, amount and apology stays)\n"
                 : "- the main claim of the text (what it argues for or tells), which stays, said plainly\n"
-                + "- at most two points to drop: generic ones any text on the topic would make, or ones that repeat another; every other argument stays\n")
+                + "- at most two points to drop: generic ones any text on the topic would make, or ones that repeat another; every other argument stays. "
+                + "A figure, date, name or measured result is the opposite of generic: a point that has one stays, with it\n")
             + "- the points to merge into one\n"
             + "- the opening: the writer's position or a plain fact from the text, in one sentence; not a scene, an example, a question or the thesis in grand words\n"
             + "- the one point that gets most of the room, and the minor points that shrink to a clause or a sentence inside another paragraph instead of a paragraph of their own\n"
@@ -2081,16 +2086,89 @@ function buildPlanMessages(text, lang, critique, letter) {
     ];
 }
 
-// Pass "plain" (Plainer, German): the same content in plain spoken German, long
-// sentences split, everyday verbs instead of noun chains, the main noun repeated. The fact
-// check runs again after it.
-function buildPlainMessages(text) {
+// Plainer, German: one job per pass, as for English, since one prompt holding all the
+// rules split everything into 3-5 word sentences and lost the logic and sometimes the
+// meaning ("weniger fuer schnelle Loesungen, sondern ..." -> "brauchte mich"). The text
+// must stay easy to follow. "words": everyday verbs for noun chains, no sentence split or
+// joined. "split": each sentence over 12 words on its own (longSentences; the model can't
+// count), and a split that doesn't come back as two or three whole sentences with every
+// number keeps the sentence (acceptSplit). "openers": only when a row of sentences opens
+// alike ("Sie sehen ... Sie koennen ..."). The fact check runs again after them.
+const PLAIN_SPLIT_WORDS = 12;
+const PLAIN_DE_WORDS = "lange W\u00f6rter, Substantivketten und Amtsdeutsch werden zu einfachen Verben und Alltagsw\u00f6rtern, wie man sie laut sagen w\u00fcrde (\"die Einarbeitung neuer Kr\u00e4fte bindet enormen Aufwand\" -> \"es ist viel Arbeit, die Neuen einzuarbeiten\"); das Hauptwort wird wiederholt statt durch ein Synonym ersetzt. Kein Satz wird geteilt oder mit einem anderen verbunden. Kein Slang, keine Fragen.";
+function longSentences(text, max = PLAIN_SPLIT_WORDS) {
+    const t = String(text || "");
+    return splitSentences(t).map(([a, b]) => t.slice(a, b)).filter(x => (x.match(/[\p{L}\p{N}]+/gu) || []).length > max);
+}
+function buildPlainRuleMessages(text, rule) {
     return [
-        { role: "system", content: "Schreib den Text in einfacherem, gesprochenem Deutsch auf, ohne den Inhalt zu \u00e4ndern. Ersetze lange W\u00f6rter und Substantivketten durch einfache Verben und Alltagsw\u00f6rter (\"die Einarbeitung neuer Kr\u00e4fte bindet enormen Aufwand\" -> \"es ist viel Arbeit, die Neuen einzuarbeiten\"). "
-            + "Teile lange S\u00e4tze; ab und zu ein Satz mit drei bis f\u00fcnf W\u00f6rtern. Wiederhole das Hauptwort, statt ein Synonym zu suchen. Kein Slang, keine Fragen, keine erfundenen Beispiele oder S\u00e4tze. "
-            + "Anrede, Zahlen, Namen und Daten bleiben genau gleich, nichts kommt dazu, nichts f\u00e4llt weg. Korrektes Deutsch. Antworte nur mit dem Text." },
+        { role: "system", content: `Bearbeite den Text unten. \u00c4ndere nur eines: ${rule} `
+            + "Jeder andere Satz bleibt genau so, wie er ist; die Abs\u00e4tze, die Anrede, jede Zahl, jeder Name und jedes Datum bleiben, und nichts kommt dazu, was der Text nicht sagt. Korrektes Deutsch. Antworte nur mit dem Text." },
         { role: "user", content: String(text).trim() },
     ];
+}
+function plainOpenerRule(words) {
+    return `mehrere S\u00e4tze hintereinander beginnen mit "${words}". Stell einige davon um (ein anderes Satzglied nach vorn) oder verbinde zwei davon mit "und", damit keine zwei S\u00e4tze hintereinander mit denselben W\u00f6rtern beginnen.`;
+}
+function buildSplitMessages(sentence) {
+    return [
+        { role: "system", content: "Teile den Satz in zwei, h\u00f6chstens drei vollst\u00e4ndige S\u00e4tze, ohne den Inhalt zu \u00e4ndern. "
+            + "Jeder neue Satz hat sein eigenes Verb und ist allein verst\u00e4ndlich; ein Nebensatz mit \"dass\", \"weil\", \"wenn\", \"was\" oder \"der\", \"die\", \"das\" bleibt an seinem Hauptsatz, ebenso ein Teil mit \"statt ... zu\", \"ohne ... zu\" oder \"um ... zu\". "
+            + "Hatte der Satz ein Wort, das zeigt, wie seine Teile zueinander stehen (\"weil\", \"aber\", \"deshalb\", \"weniger ... als\"), beginnt der neue Satz mit einem Wort, das genau diesen Zusammenhang zeigt (\"denn\", \"aber\", \"deshalb\"); sonst beginnt er ohne so ein Wort. Nimm nie \"dabei\" als Verbindung. "
+            + "Die Aussagen bleiben in der Reihenfolge, in der sie im Satz stehen. Ein Gegensatz beh\u00e4lt beide Seiten. Zwei S\u00e4tze hintereinander beginnen nicht mit demselben Wort. "
+            + "Anrede, Zahlen, Namen und Daten bleiben genau gleich; nichts kommt dazu. Antworte nur mit den S\u00e4tzen." },
+        { role: "user", content: String(sentence).trim() },
+    ];
+}
+// The split of `sentence` in `reply`, or null: two or three sentences of four words or
+// more, not opening alike, every number kept, about as long as the sentence.
+function acceptSplit(sentence, reply) {
+    const s = String(sentence || "").trim();
+    let t = stripThinking(reply).replace(/\s+/g, " ").trim();
+    if (!/^["'\u201c\u201e]/.test(s)) t = t.replace(/^["'\u201c\u201e]+|["'\u201c\u201d]+$/g, "").trim();
+    const words = x => (x.match(/[\p{L}\p{N}]+/gu) || []).length;
+    const first = x => (x.toLowerCase().match(/[\p{L}\p{N}']+/u) || [""])[0];
+    const parts = splitSentences(t).map(([a, b]) => t.slice(a, b));
+    if (parts.length < 2 || parts.length > 3 || parts.some(p => words(p) < 4)) return null;
+    if (parts.some((p, i) => i && first(p) === first(parts[i - 1]))) return null;
+    if (missingNumbers(s, t).length || PREAMBLE_RE.test(t)) return null;
+    const r = words(t) / Math.max(1, words(s));
+    return r >= 0.75 && r <= 1.4 ? t : null;
+}
+
+// The speaker pass, once the kind of text is known (pass "kind"): only the one form of
+// speaker that fits it, so that an argued text gets no "you'll find" and a how-to no "I'd
+// expect". Unknown kind: the rule in WHOLE_PLAIN_EN, which names all three.
+const SPEAKER_LIMITS = "One or two such words per paragraph, not on every sentence. A claim from people or reports the text names is told as what they found. Plain facts, numbers, history and instructions stay as they are. Name no source the text doesn't name and give the writer no experiences the text doesn't give them.";
+const TEXT_KINDS = {
+    A: { id: "own", label: "the writer, their team or their company tells about their own work, product, plans or experience",
+        speaker: "as what the writer or their team saw, did or noticed (\"the team pushed back\", \"we noticed\"), never as a guess" },
+    B: { id: "howto", label: "instructions or advice that tell the reader what to do",
+        speaker: "as what the reader will see or find when they do it (\"you'll notice\", \"you'll find\")" },
+    C: { id: "argue", label: "the writer argues for a position or an opinion",
+        speaker: "as the writer's own expectation or doubt (\"I'd expect\", \"I don't think\")" },
+};
+
+// Pass "kind": one letter of TEXT_KINDS for the text.
+function buildTextKindMessages(text) {
+    return [
+        { role: "system", content: "What kind of text is this? Answer with one letter only:\n"
+            + Object.entries(TEXT_KINDS).map(([k, v]) => `${k} = ${v.label}`).join("\n") },
+        { role: "user", content: String(text).trim() },
+    ];
+}
+
+// The kind (TEXT_KINDS key) in a reply to buildTextKindMessages, or null.
+function parseTextKind(reply) {
+    const m = stripThinking(reply).trim().match(/^[*_("'\s]*([ABC])\b/i);
+    return m ? m[1].toUpperCase() : null;
+}
+
+// The speaker rule for one kind of text. With only one form on offer the model repeats
+// it ("You'll find that ..." opening every paragraph), hence the last line.
+function speakerRule(kind) {
+    return "every general claim the text states as a plain fact without saying where it comes from is given a speaker, "
+        + TEXT_KINDS[kind].speaker + ". " + SPEAKER_LIMITS + " Word each one differently: never the same words twice.";
 }
 
 // The English passes of Plainer, in order. Each changes one kind of sentence and leaves
@@ -2116,9 +2194,7 @@ const WHOLE_PLAIN_EN = [
         + "of text would: where the writer tells about their own work or team (I, we), as what they saw, did or noticed (\"the team pushed "
         + "back\", \"we noticed\"), never as a guess; in instructions or a how-to, as what you will see or find when you do it (\"you'll "
         + "notice\", \"you'll find\"); only in a text that argues for a position, as the writer's own expectation (\"I'd expect\", "
-        + "\"I don't think\"). One or two such words per paragraph, not on every sentence. A claim from people or reports the text names "
-        + "is told as what they found. Plain facts, numbers, history and instructions stay as they are. Name no source the text doesn't "
-        + "name and give the writer no experiences the text doesn't give them." },
+        + "\"I don't think\"). " + SPEAKER_LIMITS },
     { id: "alternatives", rule: "two things are cut, everything else stays word for word. (1) The alternative the text sets a point against: \"instead of X\", "
         + "\"rather than X\", \"not X but\" clauses, where X is what you should not do or what the thing is not; keep the point itself. "
         + "(2) An explanation of why a piece of advice works (\"because pajamas tell your body...\", \"so your mind can...\", \"the context "
@@ -2222,15 +2298,16 @@ function buildOutlineMessages(text, lang) {
     ];
 }
 
-// Pass "review": the sentences a strict reviewer would still flag, as a list.
-function buildSentenceReviewMessages(text) {
+// Pass "review": the sentences a strict reviewer would still flag, as a list of at most
+// `max`.
+function buildSentenceReviewMessages(text, max = 6) {
     return [
         { role: "system", content: "Check this text for AI-typical writing patterns, sentence by sentence, the way a strict AI-text reviewer would: "
             + "a punchy or generic opening, a rhetorical transition into the counter-argument, a polished closing line that rounds the text off, "
             + "\"X without losing Y\" and other elegant pairings, a general claim drawn from a number, business phrases, sayings, "
             + "a tidy pro, contra and solution order, parallel sentence shapes. "
             + "For each sentence that would be flagged, give one bullet: the sentence quoted exactly, then after \" -> \" what makes it AI-typical. "
-            + "Only the sentences that would really be flagged, at most 6. No rewrite." },
+            + `Only the sentences that would really be flagged, at most ${max}. No rewrite.` },
         { role: "user", content: String(text).trim() },
     ];
 }
@@ -2303,13 +2380,17 @@ function wholeSpotNotes(text, lang, orig) {
     for (const m of WHOLE_CONTRASTS[lang] ? t.matchAll(phraseListRe(WHOLE_CONTRASTS[lang])) : []) {
         if (!contrasts.some(c => c.includes(m[0]) || m[0].includes(c))) contrasts.push(m[0]);
     }
-    const notes = contrasts.map(c => `- set-up contrast: "${c}". Say the point directly, without the "not ... but" shape.`);
+    // In German the plain fix must keep the side that is "not" ("Mein Team wollte meine
+    // Haltung" lost the solutions the team did not need), and the link of a concession.
+    const sides = lang === "de" ? " Keep both sides, as two plain statements: what it is not stays in." : "";
+    const notes = contrasts.map(c => `- set-up contrast: "${c}". Say the point directly, without the "not ... but" shape.${sides}`);
     for (const [a, b] of findStockPhrases(t, lang)) {
         const p = t.slice(a, b);
         if (!contrasts.some(c => c.includes(p) || p.includes(c))) notes.push(`- stock phrase: "${p}". Cut it or say it plainly.`);
     }
     for (const m of t.matchAll(phraseListRe(WHOLE_TRIPLETS[lang] || WHOLE_TRIPLETS.en))) notes.push(`- list of three: "${m[0]}". Break the even triplet up: keep the items that are facts, but not as three matching parts in a row.`);
-    for (const m of t.matchAll(phraseListRe(WHOLE_CONCESSIONS[lang] || WHOLE_CONCESSIONS.en))) notes.push(`- concession: "${m[0]}". Give both facts plainly, without the "of course ... but" move.`);
+    for (const m of t.matchAll(phraseListRe(WHOLE_CONCESSIONS[lang] || WHOLE_CONCESSIONS.en))) notes.push(lang === "de" ? `- concession: "${m[0]}". Drop only the opening word ("nat\u00fcrlich", "klar", "zugegeben"); keep both facts and the "aber" that links them.`
+        : `- concession: "${m[0]}". Give both facts plainly, without the "of course ... but" move.`);
     for (const m of t.matchAll(phraseListRe(WHOLE_TELLS[lang] || WHOLE_TELLS.en))) notes.push(`- filler: "${m[0]}". Cut it; the sentence works without it.`);
     if (orig) for (const c of copiedSentences(orig, t)) notes.push(`- copied from the original: "${c}". Say it in your own plain words, keeping every fact, name and number in it.`);
     return [...new Set(notes)].slice(0, 10);
@@ -2341,11 +2422,13 @@ function buildSlopFindMessages(text, lang) {
 
 // `text` without the sentences quoted in `reply` (buildSlopFindMessages), at most a
 // third of its sentences, and never one with a digit, the writer's "I"/"we" or advice
-// ("should", "muss") in it (FILLER_KEEP_RE); a paragraph left empty goes. Returns the
-// new text and the sentences cut.
+// ("should", "muss") in it (FILLER_KEEP_RE); a paragraph left empty goes. In German a
+// sentence that carries the argument on ("aber", "sodass", "deshalb") stays too: cutting
+// "Ein Team ... sodass sich der Aufwand amortisiert" left only "Der Anfang ist nicht
+// billig", the opposite of the point. Returns the new text and the sentences cut.
 const FILLER_KEEP_RE = {
     en: /(?<![\p{L}])(?:i|me|my|we|us|our|should|must|need to|have to)(?![\p{L}])/iu,
-    de: /(?<![\p{L}])(?:ich|mich|mir|mein\p{L}*|wir|uns|unser\p{L}*|sollte\p{L}*|soll|sollen|muss|m\u00fcssen|musst)(?![\p{L}])/iu,
+    de: /(?<![\p{L}])(?:ich|mich|mir|mein\p{L}*|wir|uns|unser\p{L}*|sollte\p{L}*|soll|sollen|muss|m\u00fcssen|musst|aber|doch|trotzdem|dennoch|sodass|deshalb|daher)(?![\p{L}])/iu,
 };
 function cutFillerSentences(text, reply, lang) {
     const keep = FILLER_KEEP_RE[lang] || FILLER_KEEP_RE.en;
@@ -2386,10 +2469,13 @@ function buildProofreadMessages(text, lang) {
 // moral, a closing summary, a weaker argument) and the marked illustration are named
 // as not errors, so that the fix doesn't put them back. With `free` (Rewrite freely) a
 // dropped point and an added typical example are never errors either; a point kept
-// must still be right.
-function buildFactCheckMessages(orig, text, lang, details, free) {
+// must still be right; `gone` (Rewrite freely) are the original's numbers the rewrite no
+// longer has, each an error only where the rewrite still makes its point.
+function buildFactCheckMessages(orig, text, lang, details, free, gone) {
     const name = wholeLanguage(lang) || "the language of the text";
     const d = String(details || "").replace(/\s+/g, " ").trim().slice(0, 600);
+    const lost = free && gone && gone.length ? `These numbers of the original are no longer in the rewrite: ${gone.join(", ")}. `
+        + "Where the rewrite still makes the point a number belongs to, the missing number is an error: list it. " : "";
     return [
         { role: "system", content: "You compare an original text with a rewrite of it. List only real errors in the rewrite:\n"
             + (free ? "- a fact, name, number, date or amount that the rewrite keeps but changed, and an apology, promise or request of the original that is missing or changed\n"
@@ -2405,18 +2491,24 @@ function buildFactCheckMessages(orig, text, lang, details, free) {
             + "a plainer, less emphatic wording of an apology, thanks or courtesy, an opinion now marked as the writer's own (\"I think\"), "
             + "and a weaker argument merged into another. "
             + (free ? "The rewrite was allowed to change the content: a dropped or merged point, a new order, and an added typical example (no names, figures or dates) are not errors either. " : "")
+            + lost
             + "Write one bullet per error, in the form: - \"words from the rewrite\" -> what is wrong. "
             + "Don't list what is correct or acceptable, and don't explain your reasoning. If there is no error, reply with exactly: OK" },
         { role: "user", content: `Original:\n${String(orig).trim()}\n\n` + (d ? `Details the writer added (these may appear in the rewrite; check them too):\n${d}\n\n` : "") + `Rewrite:\n${String(text).trim()}` },
     ];
 }
 
-// The numbers of `orig` (digits, with their inner separators: "4,500", "6", "23") that
-// `text` no longer has, found in code as a check on the model's fact check.
+// The numbers of `orig` (digits, with their inner separators: "4,500", "6", "23", "24/7")
+// that `text` no longer has, found in code as a check on the model's fact check. One
+// written out in `text` ("twelve-hour" for "12-hour", "zw\u00f6lf") counts as kept; 1 is left
+// out, "one" and "ein" being everywhere.
+const NUMBER_WORDS = { 2: "two|zwei", 3: "three|drei", 4: "four|vier", 5: "five|f\u00fcnf", 6: "six|sechs", 7: "seven|sieben", 8: "eight|acht", 9: "nine|neun", 10: "ten|zehn", 11: "eleven|elf", 12: "twelve|zw\u00f6lf", 13: "thirteen|dreizehn", 14: "fourteen|vierzehn", 15: "fifteen|f\u00fcnfzehn", 16: "sixteen|sechzehn", 17: "seventeen|siebzehn", 18: "eighteen|achtzehn", 19: "nineteen|neunzehn", 20: "twenty|zwanzig", 30: "thirty|drei\u00dfig", 40: "forty|vierzig", 50: "fifty|f\u00fcnfzig", 60: "sixty|sechzig", 70: "seventy|siebzig", 80: "eighty|achtzig", 90: "ninety|neunzig", 100: "a hundred|one hundred|hundert" };
 function missingNumbers(orig, text) {
-    const nums = s => [...new Set(String(s || "").match(/\d+(?:[.,]\d+)*/g) || [])];
-    const have = new Set(nums(text));
-    return nums(orig).filter(n => !have.has(n));
+    // "11:00" and "11.00" are the same time as "11".
+    const nums = s => [...new Set((String(s || "").match(/\d+(?:[.,/:]\d+)*/g) || []).map(n => n.replace(/[:.]00$/, "")))];
+    const t = String(text || ""), have = new Set(nums(t));
+    const said = n => NUMBER_WORDS[n] && new RegExp(`(?<![\\p{L}])(?:${NUMBER_WORDS[n]})(?![\\p{L}])`, "iu").test(t);
+    return nums(orig).filter(n => !have.has(n) && !said(n));
 }
 
 // A fact-check "error" that is about style, not content (a metaphor, a saying, a
@@ -2458,10 +2550,27 @@ function buildFactFixMessages(orig, text, lang, errors) {
     ];
 }
 
+// The longest run of sentences in a row (inside one paragraph) that start with the same
+// two words ("You can see ... You can download ..."), as { n, words }.
+function sameOpenerRun(text, k = 2) {
+    let best = { n: 0, words: "" };
+    for (const para of String(text || "").split(/\n\s*\n/)) {
+        let prev = null, n = 0;
+        for (const [a, b] of splitSentences(para)) {
+            const ws = (para.slice(a, b).toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).slice(0, k), w = ws.join(" ");
+            n = ws.length === k && w === prev ? n + 1 : 1;
+            prev = w;
+            if (n > best.n) best = { n, words: w };
+        }
+    }
+    return best;
+}
+
 // A model commenting on the text instead of writing it ("though the text does not
 // specify which product, survey, or baseline this figure compares to", "Wir lassen hier
-// die Kosten weg").
-const META_COMMENT_RE = /\b(?:the (?:original|rewrite|rewritten text|source text)\b|the (?:text|passage|author) (?:does not|doesn't|did not|says|states|mentions|specifies|gives|provides)\b|(?:der|im|vom|dem) (?:Originaltext|Ausgangstext|Original)\b|der Text (?:nennt|sagt|gibt|erw\u00e4hnt|enth\u00e4lt) (?:nicht|keine?n?)\b|(?:lassen wir|lasse ich|wir lassen|ich lasse) [^.!?]{0,60}?(?:weg|au(?:ss|\u00df)en vor)\b|(?:we|I)(?:['\u2019]ll| will)? (?:leave|set|skip) [^.!?]{0,40}?(?:aside|out)\b)/i;
+// die Kosten weg"). "The original" counts only as a noun of its own ("the original
+// says", "as in the original."), not in "The original plan had us open five days".
+const META_COMMENT_RE = /\b(?:the (?:original|rewrite|rewritten text|source text)(?=[,.;:)]| text\b| (?:does not|doesn't|did not|says|states|mentions|specifies|gives|provides|names|lists)\b)|the (?:text|passage|author) (?:does not|doesn't|did not|says|states|mentions|specifies|gives|provides)\b|(?:der|im|vom|dem) (?:Originaltext|Ausgangstext|Original)\b|der Text (?:nennt|sagt|gibt|erw\u00e4hnt|enth\u00e4lt) (?:nicht|keine?n?)\b|(?:lassen wir|lasse ich|wir lassen|ich lasse) [^.!?]{0,60}?(?:weg|au(?:ss|\u00df)en vor)\b|(?:we|I)(?:['\u2019]ll| will)? (?:leave|set|skip) [^.!?]{0,40}?(?:aside|out)\b)/i;
 
 // Is `reply` a usable result of a text-producing pass? `orig` is the text's body as it
 // came in, `prev` the text the pass was given. The rewrite may change everything but
@@ -2501,6 +2610,17 @@ function acceptWholeRewrite(orig, prev, reply, lang, pass) {
         const words = x => (x.match(/[\p{L}\p{N}]+/gu) || []).length;
         const floor = pass === "fix" ? 0 : pass === "verdicts" || pass === "alternatives" ? 0.5 : 0.8;
         if (words(t) < floor * words(p)) return { ok: false, reason: "the model cut part of the text" };
+        // Chopping a sentence into a row of "You can ... You can ..." reads as a list; the
+        // fix is let through, since a fact counts for more.
+        // German also by the first word alone: "Sie sehen ... Sie k\u00f6nnen ... Sie m\u00fcssen ...".
+        const run = sameOpenerRun(t), one = lang === "de" ? sameOpenerRun(t, 1) : { n: 0 };
+        if (pass !== "fix" && pass !== "split" && run.n >= 3 && run.n > sameOpenerRun(p).n) return { ok: false, run: run.words, reason: `the model started ${run.n} sentences in a row with "${run.words}"` };
+        if (pass !== "fix" && pass !== "split" && one.n >= 4 && one.n > sameOpenerRun(p, 1).n) return { ok: false, run: one.words, reason: `the model started ${one.n} sentences in a row with "${one.words}"` };
+        // "words" may not split sentences; now and then two main clauses joined by a comma.
+        if (pass === "words") {
+            const count = x => x.split(/\n\s*\n/).reduce((k, q) => k + splitSentences(q).length, 0);
+            if (count(t) > count(p) + Math.ceil(count(p) / 4)) return { ok: false, split: true, reason: "the model split sentences" };
+        }
         // A later pass may not lose a figure the text still had.
         const lost = missingNumbers(p, t).filter(n => !missingNumbers(o, p).includes(n) && o.includes(n));
         if (lost.length) return { ok: false, reason: `the model dropped the number ${lost[0]}` };
@@ -2520,7 +2640,7 @@ function acceptWholeRewrite(orig, prev, reply, lang, pass) {
 // `body` and `info` for the report.
 async function wholeRewrite(text, lang, o, chat) {
     o = o || {};
-    const info = { free: !!o.free, cut: [], passes: [], errors: [], remaining: [], missing: [], fixed: false, failed: null, stopped: false, error: null, letter: false, change: 0, before: 0, after: 0, spotsFound: 0, spotsLeft: 0, flagged: 0 };
+    const info = { free: !!o.free, cut: [], passes: [], errors: [], remaining: [], missing: [], fixed: false, failed: null, stopped: false, error: null, letter: false, change: 0, before: 0, after: 0, spotsFound: 0, spotsLeft: 0, flagged: 0, kind: null };
     const frame = splitLetterFrame(text);
     const orig = frame.body;
     info.letter = frame.letter;
@@ -2534,6 +2654,21 @@ async function wholeRewrite(text, lang, o, chat) {
         const v = acceptWholeRewrite(orig, cur, reply, lang, id);
         if (v.ok) cur = v.text;
         info.passes.push({ id, ok: v.ok, reason: v.ok ? "" : v.reason });
+        return v;
+    };
+    // An editing pass on the current text (`build(cur)` makes its messages). A reply
+    // refused for a row of sentences opening alike gets one second try with a note
+    // naming it: the pass itself is wanted (German Plainer carries most of its effect).
+    const edit = async (id, build, think) => {
+        let v = use(id, await chat(id, build(cur), textTokens, think));
+        if (!v.ok && (v.run || v.split)) {
+            info.passes.pop();
+            const note = v.split ? "Deine erste Antwort hat S\u00e4tze geteilt. Teile keinen Satz; \u00e4ndere nur die W\u00f6rter."
+                : lang === "de" ? `Deine erste Antwort hatte mehrere S\u00e4tze hintereinander, die mit "${v.run}" beginnen. Stell sie um oder verbinde zwei davon, damit keine zwei S\u00e4tze hintereinander gleich anfangen.`
+                : `Your first answer had several sentences in a row starting with "${v.run}". Reword or join them so that no two sentences in a row start the same way.`;
+            const m = build(cur);
+            v = use(id, await chat(id, [{ ...m[0], content: m[0].content + "\n" + note }, ...m.slice(1)], textTokens, think));
+        }
         return v;
     };
     const bullets = t => (String(t).match(/^\s*(?:[-*\u2022]|\d+[.)])\s+\S/gm) || []).length;
@@ -2557,16 +2692,21 @@ async function wholeRewrite(text, lang, o, chat) {
             }
             if (!v.ok) { info.failed = v.reason; return { frame, body: orig, info }; }
         }
-        const review = stripThinking(await chat("review", buildSentenceReviewMessages(cur), notesTokens));
+        // At most a third of the sentences: a review that flags nearly all of them makes
+        // the sentences pass a second, choppier rewrite.
+        const sentences = cur.split(/\n\s*\n/).reduce((n, p) => n + splitSentences(p).length, 0);
+        const review = stripThinking(await chat("review", buildSentenceReviewMessages(cur, Math.max(1, Math.min(6, Math.ceil(sentences / 3)))), notesTokens));
         info.flagged = bullets(review);
-        if (info.flagged) use("sentences", await chat("sentences", buildSentenceFixMessages(cur, lang, review), textTokens));
-        // A number the free rewrite dropped went with its point.
-        info.errors = factCheckErrors(await chat("facts", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError)
+        if (info.flagged) await edit("sentences", t => buildSentenceFixMessages(t, lang, review));
+        // A number the free rewrite dropped may have gone with its point: the fact check
+        // gets the list and decides.
+        const facts = () => buildFactCheckMessages(orig, cur, lang, o.details, o.free, missingNumbers(orig, cur));
+        info.errors = factCheckErrors(await chat("facts", facts(), notesTokens)).filter(isFactError)
             .concat(o.free ? [] : missingNumbers(orig, cur).map(n => `- the number "${n}" of the original is missing -> put it back where it belongs`)).slice(0, 12);
         if (info.errors.length) {
             info.fixed = use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, info.errors), textTokens)).ok;
             // What a second check finds goes to the report, not to another round of fixes.
-            if (info.fixed) info.remaining = factCheckErrors(await chat("recheck", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError);
+            if (info.fixed) info.remaining = factCheckErrors(await chat("recheck", facts(), notesTokens)).filter(isFactError);
         }
         const spots = wholeSpotNotes(cur, lang, orig);
         info.spotsFound = spots.length;
@@ -2583,9 +2723,23 @@ async function wholeRewrite(text, lang, o, chat) {
             if (c.cut.length) { cur = c.text; info.cut = c.cut; }
         }
         if (o.plain && (lang === "de" || lang === "en")) {
-            if (lang === "de") use("plain", await chat("plain", buildPlainMessages(cur), textTokens));
-            else for (const p of WHOLE_PLAIN_EN) use(p.id, await chat(p.id, buildOneRuleMessages(cur, p.rule), textTokens, think));
-            const errs = factCheckErrors(await chat("facts", buildFactCheckMessages(orig, cur, lang, o.details, o.free), notesTokens)).filter(isFactError).slice(0, 12);
+            if (lang === "de") {
+                await edit("words", t => buildPlainRuleMessages(t, PLAIN_DE_WORDS));
+                let split = cur;
+                for (const s of longSentences(cur)) {
+                    const t = acceptSplit(s, await chat("split", buildSplitMessages(s), Math.min(600, 64 + s.length)));
+                    if (t) split = split.replace(s, () => t);
+                }
+                if (split !== cur) use("split", split);
+                const run = [sameOpenerRun(cur), sameOpenerRun(cur, 1)].find((r, i) => r.n >= (i ? 3 : 2));
+                if (run) use("openers", await chat("openers", buildPlainRuleMessages(cur, plainOpenerRule(run.words)), textTokens));
+            } else {
+                // The kind is read from the original: the rewrite may have cut what shows it.
+                const kind = parseTextKind(await chat("kind", buildTextKindMessages(orig), 16));
+                info.kind = kind ? TEXT_KINDS[kind].id : null;
+                for (const p of WHOLE_PLAIN_EN) await edit(p.id, t => buildOneRuleMessages(t, p.id === "speaker" && kind ? speakerRule(kind) : p.rule), think);
+            }
+            const errs = factCheckErrors(await chat("facts", facts(), notesTokens)).filter(isFactError).slice(0, 12);
             if (errs.length) {
                 info.errors = info.errors.concat(errs);
                 use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, errs), textTokens));

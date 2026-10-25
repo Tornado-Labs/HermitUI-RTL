@@ -153,13 +153,44 @@ poll with `page.evaluate` instead.
   (`buildPlanMessages`) before the rewrite, content rules in place of the keep-every-claim
   ones, a fact check that allows dropped points, and no missing-number errors for the fix.
   **Plainer** (`#optPlain`, `o.plain`, German and English text, off by default): passes
-  before the proofreading, then the fact check and fix once more. German: a `plain` pass
-  (`buildPlainMessages`), plain spoken German with short sentences. English: the five
+  before the proofreading, then the fact check and fix once more. German: one job per pass, as for English, since one `plain` prompt holding all the
+  rules was followed only in part. `words` (`buildPlainRuleMessages` with
+  `PLAIN_DE_WORDS`): everyday verbs for noun chains, no sentence split or joined
+  (`acceptWholeRewrite` refuses a reply with clearly more sentences). `split`: each
+  sentence over 12 words (`longSentences`, counted in code since the model can't count)
+  goes to the model on its own (`buildSplitMessages`) and comes back as two or three
+  whole sentences, the link word kept ("deshalb", "aber"), both sides of a contrast kept,
+  a "statt/ohne/um ... zu" part left with its clause (split off, "verbraucht, statt ihn
+  einzuspeisen" became "Stattdessen muss man ihn einspeisen", the opposite);
+  `acceptSplit` keeps the original sentence when the answer is still one sentence, has a
+  fragment, opens two parts alike, loses a number or changes the length much. `openers`:
+  only when a row of sentences opens alike ("Sie sehen ... Sie koennen ..."), one edit
+  naming the words. **The German must stay easy to understand:** the single prompt once
+  split everything into 3-5 word sentences and lost the logic and sometimes the meaning
+  ("weniger fuer schnelle Loesungen, sondern ..." -> "brauchte mich");
+  don't trade that back for a shorter rhythm. For the same reason the German
+  spots notes keep both sides of a contrast and the "aber" of a concession (dropping
+  only "natuerlich"), and the slop cut leaves a German sentence with "aber", "sodass",
+  "deshalb" and the like (`FILLER_KEEP_RE`): it once cut the payoff of a cost sentence. English: the five
   passes of `WHOLE_PLAIN_EN` (`buildOneRuleMessages`), one kind of sentence each; a
   single prompt holding all five rules did not work. With English Plainer the rewrite and
   these passes ask a server for thinking (`think: "low"` -> `chat_template_kwargs`
   `{enable_thinking, reasoning_effort}`); the in-browser model never thinks. The passes
-  that cut (`verdicts`, `alternatives`) may shorten the text to half.
+  that cut (`verdicts`, `alternatives`) may shorten the text to half. Before the five, a
+  `kind` pass (`buildTextKindMessages`, `parseTextKind`) reads from the original whether
+  the writer tells about their own work, gives instructions, or argues (`TEXT_KINDS`), and
+  the speaker pass gets only that kind's form (`speakerRule`); an unreadable answer keeps
+  the rule with all three.
+- **Checks shared by the passes.** `acceptWholeRewrite` refuses a later pass (not the
+  fix) that starts more sentences in a row with the same two words than its input had,
+  three or more (`sameOpenerRun`): "You can see ... You can download ..." is a list
+  chopped up. German also counts the first word alone, from four in a row ("Sie sehen
+  ... Sie koennen ... Sie muessen ..."). The sentences pass, German `words` and the English Plainer passes run
+  through `edit`, which gives such a refusal (and a `words` split refusal) one second
+  try with a note: refusing German `words` outright loses most of what Plainer does. The review flags at most a third of the sentences (at most 6), so the
+  sentences pass stays an edit. With Rewrite freely the fact checks get the numbers the
+  rewrite lost (`missingNumbers`, `24/7` counting as one) and list one only where its
+  point is still there; without it, every lost number is an error.
 - **Every prompt** starts with `NO_HIDDEN_MARKS` (`withNoHiddenMarks` in `buildChatBody`,
   `buildRewriteBody` and the in-browser path). The e2e mock (`tests/mock_openai.py`) skips
   that first line when it tells the passes apart.

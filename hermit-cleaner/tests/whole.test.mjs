@@ -4,7 +4,8 @@ import m from "./extract.mjs";
 import { check, section, report } from "./check.mjs";
 
 const { splitLetterFrame, buildCritiqueMessages, buildWholeRewriteMessages, buildSentenceFixMessages, wholeSpotNotes,
-    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainMessages, buildOneRuleMessages, WHOLE_PLAIN_EN, WHOLE_PASSES } = m;
+    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainRuleMessages, buildSplitMessages, acceptSplit, buildOneRuleMessages, WHOLE_PLAIN_EN, WHOLE_PASSES,
+    buildSentenceReviewMessages, buildTextKindMessages, parseTextKind, speakerRule, sameOpenerRun, longSentences } = m;
 
 const BODY_EN = "The Q3 budget review is next Thursday. I will send a full overview of the key figures by Tuesday.\n\n"
     + "The travel costs for the Berlin fair came in about 4,500 euros over our estimate.";
@@ -53,6 +54,10 @@ section("prompts");
     const fc = buildFactCheckMessages(BODY_EN, "x", "en", "I run the finance team.");
     check("fact check: original, details and rewrite", fc[1].content.startsWith("Original:\n") && fc[1].content.includes("Details the writer added") && fc[1].content.includes("Rewrite:\nx"));
     check("fact check: a reworded or split fact is no error", fc[0].content.includes("split over two sentences") && fc[0].content.includes("softer degree word"));
+    const gone = buildFactCheckMessages(BODY_EN, "x", "en", "", true, ["4,500", "24/7"])[0].content;
+    check("fact check, free: the lost numbers, an error only where their point stays", gone.includes("no longer in the rewrite: 4,500, 24/7") && gone.includes("still makes the point"));
+    check("fact check, not free: no such list (a lost number is an error there anyway)", !buildFactCheckMessages(BODY_EN, "x", "en", "", false, ["4,500"])[0].content.includes("no longer in the rewrite"));
+    check("review: at most the number asked for", buildSentenceReviewMessages("t", 2)[0].content.includes("at most 2.") && buildSentenceReviewMessages("t")[0].content.includes("at most 6."));
     check("fact check: German illustration markers", buildFactCheckMessages(BODY_DE, "x", "de")[0].content.includes("\"etwa\""));
     const fix = buildFactFixMessages(BODY_EN, "rewritten", "en", ["- \"x\" -> wrong"]);
     check("fix: errors listed, the rewrite edited, the original for facts only", fix[0].content.includes("- \"x\" -> wrong") && fix[1].content === "rewritten" && fix[0].content.includes("Never copy a sentence from the original") && fix[0].content.includes("make sense as a whole"));
@@ -63,7 +68,7 @@ section("prompts");
     check("chat body without kwargs", !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true)) && !("chat_template_kwargs" in buildChatBody("m", [], 0.2, true, "low")));
     const thinking = buildChatBody("m", [], 0.5, false, "low").chat_template_kwargs;
     check("chat body with thinking: on, at the effort asked for", thinking.enable_thinking === true && thinking.reasoning_effort === "low");
-    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,plain,verdicts,objections,everyday,speaker,alternatives,proof");
+    check("passes: spots come last", WHOLE_PASSES.map(p => p.id).join() === "critique,plan,rewrite,retry,outline,draft,review,sentences,facts,fix,recheck,spots,slop,words,split,openers,kind,verdicts,objections,everyday,speaker,alternatives,proof");
     check("passes: every English Plainer pass has a pass entry", WHOLE_PLAIN_EN.every(p => WHOLE_PASSES.some(q => q.id === p.id)) && WHOLE_PLAIN_EN.length === 5);
 }
 
@@ -86,6 +91,9 @@ section("wholeSpotNotes");
     check("German concession", conc.length === 1 && conc[0].startsWith("- concession:"), conc);
     check("German concession, aber later", wholeSpotNotes("Nat\u00fcrlich kostet Weiterbildung am Anfang Geld. Die Rechnung geht aber auf.", "de").some(n => n.startsWith("- concession:")));
     check("German concession with ja", wholeSpotNotes("Ja, es kostet erst einmal Geld und Zeit. Aber es lohnt sich.", "de").some(n => n.startsWith("- concession:")));
+    check("German concession: drop the opener, keep the aber", conc[0].includes("keep both facts and the \"aber\""));
+    check("German contrast: both sides kept, English unchanged", wholeSpotNotes("F\u00fchrung ist kein Titel, sondern ein Dienst.", "de")[0].includes("Keep both sides")
+        && !wholeSpotNotes("Leadership is not a title, but a service.", "en").some(n => n.includes("Keep both sides")) && wholeSpotNotes("Leadership is not a title, but a service.", "en").length === 1);
     check("English concession", wholeSpotNotes("Of course, training costs money. But it pays off.", "en").some(n => n.startsWith("- concession:")));
     check("no concession in a plain sentence", !wholeSpotNotes("Klar war das teuer, und wir haben es trotzdem gemacht.", "de").length);
     for (const c of ["Das passiert selten lautstark, sondern in stillen Momenten.", "F\u00fcr mich ist F\u00fchrung weniger eine Position als eine Aufgabe.",
@@ -108,6 +116,10 @@ section("missingNumbers");
 {
     check("none missing", !missingNumbers(BODY_EN, "4,500 euros, Q3").length);
     check("a dropped figure", missingNumbers(ESSAY, "Atlassian saw productivity rise after 2021.").join() === "23,72");
+    check("24/7 is one number", missingNumbers("Open 24/7, since 2021.", "Open day and night, since 2021.").join() === "24/7");
+    check("a number written out counts as kept", !missingNumbers("12-hour shifts, 20 percent", "twelve-hour shifts, twenty percent").length
+        && !missingNumbers("12 Stunden", "zw\u00f6lf Stunden").length && missingNumbers("12 or 3 people", "a dozen or three").join() === "12" && missingNumbers("8 rooms", "Achtung, rooms").join() === "8");
+    check("a full hour is the same time", !missingNumbers("von 11:00 bis 17.00 Uhr, 9.500 kWh", "von 11 bis 17 Uhr, 9.500 kWh").length && missingNumbers("um 11:30", "um 11 Uhr").join() === "11:30");
     check("German dates", missingNumbers(BODY_DE, "am 6. Oktober").join() === "16", missingNumbers(BODY_DE, "am 6. Oktober"));
     check("proofread prompt keeps the casual wording", /casual is not a mistake/.test(buildProofreadMessages("x", "de")[0].content) && buildProofreadMessages("x", "de")[0].content.includes("German"));
 }
@@ -152,6 +164,9 @@ section("acceptWholeRewrite");
     check("a fix that rewrote everything is refused", /far more/.test(acceptWholeRewrite(BODY_EN, re, other, "en", "spots").reason || ""));
     check("a pass that drops a number is refused", /dropped the number 4,500/.test(acceptWholeRewrite(BODY_EN, re, re.replace("about 4,500 euros", "a lot"), "en", "fix").reason || ""));
     check("a comment on the text is refused", /commented on the text/.test(acceptWholeRewrite(BODY_EN, BODY_EN, re + " Though the text does not specify the baseline.", "en", "rewrite").reason || ""));
+    check("\"the original\" as a noun is a comment, as an adjective it isn't", /commented/.test(acceptWholeRewrite(BODY_EN, BODY_EN, re + " The original says nothing about the baseline.", "en", "rewrite").reason || "")
+        && /commented/.test(acceptWholeRewrite(BODY_EN, BODY_EN, re + " The figures are as in the original.", "en", "rewrite").reason || "")
+        && !/commented/.test(acceptWholeRewrite(BODY_EN, BODY_EN, re + " The original plan had us open five days.", "en", "rewrite").reason || ""));
     check("a cut announced in the text is refused", /commented/.test(acceptWholeRewrite(BODY_DE, BODY_DE, "Das Paket kam nicht am 6. Oktober. Die Gr\u00fcnde lassen wir hier weg. Es kommt bis 16. Oktober.", "de", "rewrite").reason || ""));
     check("German too", /commented/.test(acceptWholeRewrite(BODY_DE, BODY_DE, "Das Paket kam nicht am 6. Oktober, der Text nennt keinen Grund. Es kommt bis 16. Oktober, sagt das Original.", "de", "rewrite").reason || ""));
     const cut = re.split("\n\n")[0];
@@ -169,6 +184,8 @@ section("cutFillerSentences");
     check("two of six, the arrow note ignored", c.cut.length === 2 && c.text === "A one. D four is here. E five is here. F six is here.", c.text);
     c = cutFillerSentences("Wir bauen um. Man sollte feste Zeiten haben. Diese Struktur schafft Vertrauen. Das Netz w\u00e4chst weiter.", "- Man sollte feste Zeiten haben.\n- Diese Struktur schafft Vertrauen.\n- Wir bauen um.", "de");
     check("German: advice and the writer's own sentences stay", c.cut.join() === "Diese Struktur schafft Vertrauen.", c.cut);
+    c = cutFillerSentences("Der Anfang ist nicht billig. Ein Team arbeitet danach z\u00fcgiger, sodass sich der Aufwand amortisiert. Das ist gut so. Es bleibt dabei.", "- Ein Team arbeitet danach z\u00fcgiger, sodass sich der Aufwand amortisiert.\n- Das ist gut so.", "de");
+    check("German: a sentence that carries the argument on stays", c.cut.join() === "Das ist gut so.", c.cut);
     check("OK cuts nothing", cutFillerSentences(T, "OK").text === T);
     c = cutFillerSentences("Short fact here.\n\nOnly filler sentence in here.\n\nAnother fact stays.", "- Only filler sentence in here.");
     check("an emptied paragraph goes", c.text === "Short fact here.\n\nAnother fact stays.", JSON.stringify(c.text));
@@ -213,24 +230,63 @@ section("wholeRewrite");
     check("free: the plan runs after the critique and reaches the rewrite", s.calls.map(c => c.id).slice(0, 3).join() === "critique,plan,rewrite"
         && s.calls[2].messages[0].content.includes("drop the generic point") && s.calls[2].messages[0].content.includes("may change the content"), s.calls.map(c => c.id));
     check("free: a dropped number goes to the report, not to the fix", !s.calls.some(c => c.id === "fix") && r.info.missing.join() === "4,500" && r.info.free, s.calls.map(c => c.id));
+    check("free: an essay's plan keeps a point that has a figure", m.buildPlanMessages(ESSAY, "en", "", false)[0].content.includes("a point that has one stays, with it"));
     check("free: the slop pass runs before the proofreading", s.calls.map(c => c.id).slice(-2).join() === "slop,proof", s.calls.map(c => c.id));
     check("free: the fact check allows dropped points", s.calls.find(c => c.id === "facts").messages[0].content.includes("allowed to change the content"));
-    // Short sentences (German): one more pass before the proofreading, and the fact check again after it.
-    const RW_DE = "Ihr Paket kam am 6. Oktober leider nicht an, das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
+    check("free: the fact check gets the lost number", s.calls.find(c => c.id === "facts").messages[0].content.includes("no longer in the rewrite: 4,500."));
+    // Plainer, German: everyday words, then each long sentence split on its own, then a row opening alike; the fact check again after.
+    const RW_DE = "Ihr Paket kam am 6. Oktober nicht an, das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
         + "Wir haben es noch einmal losgeschickt, und es ist bis Donnerstag, den 16. Oktober, bei Ihnen.";
-    const PLAIN_DE = "Ihr Paket kam am 6. Oktober leider nicht an. Das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
+    const PLAIN_DE = "Ihr Paket kam am 6. Oktober nicht an, das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung im Transportnetz. "
         + "Wir haben es noch einmal losgeschickt. Es ist bis Donnerstag, den 16. Oktober, bei Ihnen.";
-    const scriptDe = extra => script("OK", { critique: "- stiff", rewrite: RW_DE, review: "", spots: RW_DE, plain: PLAIN_DE, fix: PLAIN_DE, ...extra });
+    const echo = c => c[c.length - 1].messages[1].content;
+    const scriptDe = extra => script("OK", { critique: "- stiff", rewrite: RW_DE, review: "", spots: RW_DE, words: PLAIN_DE, fix: PLAIN_DE, ...extra });
     s = scriptDe();
     r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
-    check("plain: runs before the proofreading, then the fact check again", s.calls.map(c => c.id).slice(-3).join() === "plain,facts,proof" && r.body === PLAIN_DE, s.calls.map(c => c.id));
-    check("plain: the pass gets the current text", s.calls.find(c => c.id === "plain").messages[1].content === RW_DE);
+    check("plain de: words, no split without a long sentence, then the fact check again", s.calls.map(c => c.id).slice(-3).join() === "words,facts,proof" && r.body === PLAIN_DE, s.calls.map(c => c.id));
+    check("plain de: the words pass gets the current text and one rule", s.calls.find(c => c.id === "words").messages[1].content === RW_DE
+        && s.calls.find(c => c.id === "words").messages[0].content.includes("\u00c4ndere nur eines: lange W\u00f6rter") && /Kein Satz wird geteilt/.test(s.calls.find(c => c.id === "words").messages[0].content));
+    const CHOP = PLAIN_DE.replace("Wir haben es noch einmal losgeschickt. Es ist bis", "Wir haben es noch einmal losgeschickt. Wir haben es gepr\u00fcft. Wir haben es bis");
+    s = scriptDe({ words: c => c.filter(x => x.id === "words").length === 1 ? CHOP : PLAIN_DE });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    const wordsCalls = s.calls.filter(c => c.id === "words");
+    check("plain de: a row opening alike gets one second try with a note, in German", wordsCalls.length === 2 && wordsCalls[1].messages[0].content.includes("mit \"wir haben\" beginnen") && r.body === PLAIN_DE
+        && r.info.passes.filter(p => p.id === "words").length === 1 && r.info.passes.find(p => p.id === "words").ok, [wordsCalls.length, r.info.passes]);
+    const SPLITTY = "Ihr Paket kam am 6. Oktober nicht an. Das ist leider so. Das tut mir leid. Bei unserem Logistikpartner gab es eine St\u00f6rung. Sie war im Transportnetz. "
+        + "Wir haben es noch einmal losgeschickt. Es ist bis Donnerstag, den 16. Oktober, bei Ihnen.";
+    s = scriptDe({ words: c => c.filter(x => x.id === "words").length === 1 ? SPLITTY : PLAIN_DE });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain de: a words pass that splits gets one second try with a note", s.calls.filter(c => c.id === "words").length === 2
+        && s.calls.filter(c => c.id === "words")[1].messages[0].content.includes("Teile keinen Satz") && r.body === PLAIN_DE, r.info.passes);
+    s = scriptDe({ words: CHOP });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain de: only one second try", s.calls.filter(c => c.id === "words").length === 2 && r.info.passes.some(p => p.id === "words" && !p.ok) && r.body === RW_DE, r.body);
+    // Each long sentence goes to the model on its own; a split that fails acceptSplit keeps it.
+    const LONG = "Wenn Sie Dokumente hochladen oder \u00c4nderungen vornehmen, passiert das sofort in der \u00dcbersicht, was die administrativen H\u00fcrden f\u00fcr beide Seiten deutlich senkt.";
+    const LONG_SPLIT = "Wenn Sie Dokumente hochladen oder \u00c4nderungen vornehmen, passiert das sofort in der \u00dcbersicht. Das senkt die administrativen H\u00fcrden f\u00fcr beide Seiten deutlich.";
+    s = scriptDe({ rewrite: RW_DE + " " + LONG, spots: RW_DE + " " + LONG, words: echo, split: LONG_SPLIT });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain de: one split call per long sentence, with only that sentence", s.calls.filter(c => c.id === "split" && c.messages[1].content === LONG).length === 1, s.calls.map(c => c.id));
+    check("plain de: the split goes into the text", r.body === RW_DE + " " + LONG_SPLIT && r.info.passes.some(p => p.id === "split" && p.ok), r.body);
+    s = scriptDe({ rewrite: RW_DE + " " + LONG, spots: RW_DE + " " + LONG, words: echo, split: LONG.replace("Wenn", "Falls") });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain de: a split that is still one sentence keeps the sentence", r.body === RW_DE + " " + LONG && !r.info.passes.some(p => p.id === "split"), r.body);
+    check("split prompt: whole sentences, the link, both sides", /Nebensatz .* bleibt an seinem Hauptsatz/.test(buildSplitMessages(LONG)[0].content) && /genau diesen Zusammenhang/.test(buildSplitMessages(LONG)[0].content) && /nie \"dabei\"/.test(buildSplitMessages(LONG)[0].content)
+        && /beh\u00e4lt beide Seiten/.test(buildSplitMessages(LONG)[0].content) && /in der Reihenfolge/.test(buildSplitMessages(LONG)[0].content) && /statt \.\.\. zu/.test(buildSplitMessages(LONG)[0].content) && !/stattdessen/.test(buildSplitMessages(LONG)[0].content) && buildSplitMessages(LONG)[1].content === LONG);
+    check("acceptSplit: two whole sentences", acceptSplit(LONG, LONG_SPLIT) === LONG_SPLIT && acceptSplit(LONG, "\"" + LONG_SPLIT + "\"") === LONG_SPLIT);
+    check("acceptSplit: one sentence, a fragment, the same opening, a lost number", acceptSplit(LONG, LONG) === null && acceptSplit(LONG, LONG_SPLIT.replace("Das senkt die administrativen H\u00fcrden f\u00fcr beide Seiten deutlich.", "Das senkt H\u00fcrden."))
+        === null && acceptSplit(LONG, LONG_SPLIT.replace(". Das senkt", ". Wenn das senkt")) === null && acceptSplit("Ab 1. Mai gilt das 2 Wochen lang f\u00fcr alle, die bei uns ein Konto haben und es auch nutzen wollen, weil es dann einfacher ist.", "Ab Mai gilt das zwei Wochen lang f\u00fcr alle mit Konto. Denn dann ist es einfacher f\u00fcr alle, die es nutzen.") === null);
+    // A row opening alike after the splits gets its own pass.
+    const RW_ROW = RW_DE + " Sie bekommen eine Mail. Sie bekommen auch eine Nummer.";
+    s = scriptDe({ rewrite: RW_ROW, spots: RW_ROW, words: echo, openers: RW_DE + " Sie bekommen eine Mail und auch eine Nummer." });
+    r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
+    check("plain de: a row opening alike gets the openers pass", s.calls.find(c => c.id === "openers")?.messages[0].content.includes("beginnen mit \"sie bekommen\"") && r.body.endsWith("Mail und auch eine Nummer."), s.calls.map(c => c.id));
     s = scriptDe({ facts: c => c.filter(x => x.id === "facts").length > 1 ? "- \"16. Oktober\" -> es war der 15. Oktober" : "OK", fix: PLAIN_DE.replace("Es ist bis", "Es ist sicher bis") });
     r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
-    check("plain: an error it brings in goes to a fix", s.calls.map(c => c.id).slice(-4).join() === "plain,facts,fix,proof" && r.info.errors.length === 1, s.calls.map(c => c.id));
-    s = script("OK", { plain: "x" });
+    check("plain de: an error it brings in goes to a fix", s.calls.map(c => c.id).slice(-4).join() === "words,facts,fix,proof" && r.info.errors.length === 1, s.calls.map(c => c.id));
+    s = script("OK", { words: "x" });
     await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
-    check("plain: the German pass on German text only", !s.calls.some(c => c.id === "plain"));
+    check("plain: the German passes on German text only", !s.calls.some(c => ["words", "split", "openers"].includes(c.id)));
     check("plain: no thinking for German", !(await (async () => { const t = scriptDe(); await wholeRewrite(LETTER_DE, "de", { plain: true }, t.chat); return t.calls.some(c => c.think); })()));
     // Plainer on English text: five one-rule passes, each editing what the one before left.
     const step = (a, b) => c => c[c.length - 1].messages[1].content.replace(a, b);
@@ -261,11 +317,44 @@ section("wholeRewrite");
     const short = "We moved the review to Friday, so the team gets one more day for testing.";
     check("a later pass is measured against the text it got, not the original", acceptWholeRewrite(long.repeat(4), short, "We moved the review to Friday. The team gets one more day for testing.", "en", "everyday").ok);
     check("other passes may not cut that much", !acceptWholeRewrite(long, long, "We moved the review to Friday. The team gets one more day.", "en", "everyday").ok);
+    // The kind of text picks the one speaker form; it is read from the original.
+    s = scriptEn({ kind: "C" });
+    r = await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    const sp = s.calls.find(c => c.id === "speaker").messages[0].content;
+    check("plain en: the kind pass runs before the five, on the original", s.calls.map(c => c.id).slice(-8, -6).join() === "kind,verdicts" && s.calls.find(c => c.id === "kind").messages[1].content === BODY_EN && r.info.kind === "argue", s.calls.map(c => c.id));
+    check("plain en: an argued text gets only the writer's expectation", sp.includes("I'd expect") && !sp.includes("you'll find") && !sp.includes("we noticed"));
+    s = scriptEn({ kind: "I'm not sure." });
+    r = await wholeRewrite(LETTER_EN, "en", { plain: true }, s.chat);
+    check("plain en: no kind, the rule with all three forms", s.calls.find(c => c.id === "speaker").messages[0].content.includes(WHOLE_PLAIN_EN.find(p => p.id === "speaker").rule) && r.info.kind === null);
+    check("kind: the letter, in any dress", parseTextKind("B") === "B" && parseTextKind("**c** - argues") === "C" && parseTextKind("A = the writer") === "A" && parseTextKind("OK") === null && parseTextKind("Both") === null);
+    check("kind prompt: the three kinds", /^A = .*\nB = .*\nC = /m.test(buildTextKindMessages("t")[0].content));
+    check("speaker rule per kind", speakerRule("B").includes("you'll find") && !speakerRule("B").includes("I'd expect") && speakerRule("A").includes("we noticed") && speakerRule("A").includes("Name no source"));
+    // A row of sentences with the same opening is refused, unless it was there before or the pass is the fix.
+    const listed = "In the portal you can see your orders, download invoices and change your billing details.";
+    const chopped = "You can see your orders. You can download invoices. You can change your billing details.";
+    check("same-opener run", sameOpenerRun(chopped).n === 3 && sameOpenerRun(chopped).words === "you can" && sameOpenerRun("You can go. You may stay. You can leave.").n === 1);
+    check("a run across paragraphs doesn't count", sameOpenerRun("You can go.\n\nYou can stay.\n\nYou can leave.").n === 1);
+    check("a pass that chops a sentence into a row is refused", /3 sentences in a row with "you can"/.test(acceptWholeRewrite(listed, listed, chopped, "en", "sentences").reason || ""));
+    check("a row that was there before, or the fix, is let through", acceptWholeRewrite(chopped, chopped, chopped.replace("orders", "open orders"), "en", "everyday").ok && acceptWholeRewrite(listed, listed, chopped, "en", "fix").ok);
+    // The review may flag at most a third of the sentences.
+    s = script("OK");
+    await wholeRewrite(LETTER_EN, "en", {}, s.chat);
+    check("review: at most a third of the sentences", s.calls.find(c => c.id === "review").messages[0].content.includes("at most 1."));
+
     s = scriptDe();
     await wholeRewrite(LETTER_DE, "de", {}, s.chat);
-    check("plain: off unless asked for", !s.calls.some(c => c.id === "plain"));
-    const pm = buildPlainMessages("Ein Text.");
-    check("plain prompt: German rules and the text", /gesprochenem Deutsch/.test(pm[0].content) && /nichts kommt dazu/.test(pm[0].content) && pm[1].content === "Ein Text.");
+    check("plain: off unless asked for", !s.calls.some(c => ["words", "split", "openers"].includes(c.id)));
+    check("long sentences: more than 12 words", longSentences("Das Portal startet im Mai. " + LONG).length === 1 && longSentences(LONG.split(" ").slice(0, 12).join(" ") + ".").length === 0 && longSentences(LONG.split(" ").slice(0, 13).join(" ") + ".").length === 1);
+    // German "Sie sehen ... Sie k\u00f6nnen ... Sie m\u00fcssen ...": a row of four by the first word is refused.
+    const SIE_IN = "Sie sehen den Status und k\u00f6nnen reagieren. Sie m\u00fcssen nicht warten. Dokumente laden Sie hoch.";
+    const sie = "Sie sehen den Status. Sie k\u00f6nnen reagieren. Sie m\u00fcssen nicht warten. Sie laden Dokumente hoch.";
+    check("German: four sentences opening with the same word are refused", /4 sentences in a row with "sie"/.test(acceptWholeRewrite(SIE_IN, SIE_IN, sie, "de", "sentences").reason || "")
+        && acceptWholeRewrite(SIE_IN, SIE_IN, sie.replace("Sie laden", "Dokumente laden Sie"), "de", "sentences").ok);
+    check("English: the first word alone doesn't count", sameOpenerRun("You see it. You can go. You may stay. You leave.", 1).n === 4 && acceptWholeRewrite(listed, listed, "You see it. You can go. You may stay. You leave.", "en", "everyday").run === undefined);
+    // "words" may not split sentences.
+    const SHORT = "Das Portal startet im Mai. Sie bekommen vorher die Zugangsdaten. Die Daten sind verschl\u00fcsselt.";
+    const SPLIT = "Das Portal startet. Das ist im Mai. Sie bekommen vorher Daten. Das sind die Zugangsdaten. Die Daten sind verschl\u00fcsselt. Das ist sicher.";
+    check("words: splitting sentences is refused", acceptWholeRewrite(SHORT, SHORT, SPLIT, "de", "words").split === true && acceptWholeRewrite(SHORT, SHORT, SPLIT, "de", "spots").split === undefined);
     check("not free: no plan, the keep-every-claim rules", !s.calls.length || !(await (async () => { const t = script("OK"); await wholeRewrite(LETTER_EN, "en", {}, t.chat); return t.calls.some(c => c.id === "plan") || t.calls[1].messages[0].content.includes("may change the content"); })()));
 
     s = script("OK", { spots: SENTENCES + " This is not just a fair, it's a showcase." });
