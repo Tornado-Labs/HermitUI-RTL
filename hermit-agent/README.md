@@ -31,7 +31,7 @@
   </a>
 </div>
 
-> **Status: v0.3.18** (Phase 3.7, a plan you can see). One self-contained HTML file,
+> **Status: v0.3.19** (Phase 3.7, a plan you can see). One self-contained HTML file,
 > [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (about 11 MB,
 > Python included). It is developed here, separately from the main app in
 > [`../src/`](../src/), so it can move fast without destabilising HermitUI.
@@ -69,6 +69,11 @@ The agent needs a model that can recover from its own errors. The reference task
 - **Every step can be undone.** The workspace saves a checkpoint after each step, and you can rewind to any of them, or back to the start to rephrase the task.
 - **It can't touch your machine.** Python runs as WebAssembly (Pyodide) in a Web Worker. The agent only sees the in-memory workspace where you put files.
 - **Sessions go where you put them.** Export a whole session (conversation, steps, workspace, checkpoints) to one zip file and import it later to resume or review it. The app itself remembers nothing.
+
+<div align="center">
+  <img src="site/demo-app.webp" alt="The agent builds a small library-loans app from a written spec: it writes the package and the CLI with a nine-step plan pinned above the steps, ticks the plan off, fixes the CLI after three failed tries, and finishes with all eleven tests passing" width="880" />
+  <p><i>A small app from a written spec. The plan remains pinned above the steps, and the agent checks it off as it goes.</i></p>
+</div>
 
 The agent acts through native tool calls (OpenAI `tools`) when the endpoint supports
 them (llama.cpp with `--jinja`, Ollama models with tool support), and through

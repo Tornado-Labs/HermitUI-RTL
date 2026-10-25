@@ -252,6 +252,7 @@ footer a:hover { color: var(--text); }
                 <h2>It asks before it touches your files</h2>
                 <p>Reading files and writing new ones runs on its own. A step that overwrites, deletes or moves one of your files, or tries to reach the network, stops and shows you what it wants to change and why.</p>
                 <p class="held-note">You approve, reject, or rewind to any earlier step. The workspace is saved after every step, so a bad turn costs nothing.</p>
+                <p>If it gets stuck and sends the same step a third time, that step is skipped and the agent is told why. A fourth try pauses the run for you.</p>
             </div>
             <figure style="margin:0">
                 <div class="screen">
@@ -260,6 +261,24 @@ footer a:hover { color: var(--text); }
                 </div>
                 <ul class="steps" data-video="v-fix" aria-label="Steps in this run"></ul>
                 <figcaption class="caption" id="cap-fix">A real run with Qwen3.8 27B on a local llama.cpp server, sped up with the wait cut out.</figcaption>
+            </figure>
+        </div>
+    </section>
+
+    <section class="wrap" id="plan">
+        <div class="split">
+            <div>
+                <h2>It shows you the plan</h2>
+                <p>On a longer task the agent writes down a short plan and keeps it pinned above the steps, ticking each one off as it goes. You see where it is heading, plus what it just did. A note from you changes its course, and the plan changes with it.</p>
+                <p class="held-note">Set supervision to Plan first and it halts once the plan is written. Nothing in your files changes until you approve it.</p>
+            </div>
+            <figure style="margin:0">
+                <div class="screen">
+                    <video id="v-app" src="site/demo-app.mp4" poster="site/demo-app.jpg" muted loop playsinline preload="metadata" aria-describedby="cap-app"></video>
+                    <button class="toggle" type="button" data-video="v-app">Pause</button>
+                </div>
+                <ul class="steps" data-video="v-app" aria-label="Steps in this run"></ul>
+                <figcaption class="caption" id="cap-app">A real run with Qwen3.8 27B on a local llama.cpp server, sped up with the wait cut out. The task: a small library-loans app with a CLI, tests and a README, from a written spec.</figcaption>
             </figure>
         </div>
     </section>
@@ -349,6 +368,8 @@ const CHAPTERS = {
         [14.0, "Two chart attempts fail"], [17.5, "Saves the chart and the workbook"], [21.17, "Sums it up"], [24.4, "The chart"]],
     "v-fix": [[5.74, "Reads the three files"], [8.64, "Reproduces it: both carts print 23.0"], [9.9, "Held: edits to cart.py and pricing.py", true],
         [16.71, "Runs main.py: ana 13.5, ben 8.0"], [18.48, "Explains both bugs"]],
+    "v-app": [[5.54, "Writes the package and the CLI, and its plan"], [10.59, "Writes the tests and the README"], [14.59, "Runs the tests: 11 pass"],
+        [15.15, "Trying the CLI fails three times"], [18.85, "Fixes cli.py"], [20.27, "Checks every CLI command"], [24.89, "Sums it up, plan done"]],
 };
 
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;

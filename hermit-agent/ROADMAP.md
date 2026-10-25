@@ -503,6 +503,14 @@ public docs. Each is a small patch release of its own.
   Phase 4 model, since it is trained on that format); several questions in one
   `ask_user` (opencode's `question`: little gain). pi argues against built-in to-do lists
   ("more state the model must track"); the Phase 3.7 runs found a plan does no harm.
+- **Measured, not taken: asking native mode to batch file writes** (2026-10-24). One
+  prompt line asked the model to write or edit several files in one reply instead of one
+  per reply, the main reason native needed more steps than code-as-action on the app
+  task. It did batch (four files in its first reply), but the app task got worse: 2/5
+  passed, at 18.0 steps, 5.9 min, 171k prompt tokens and 9 compactions in 5 runs,
+  against 7/8, 14.9 steps, 5.0 min and 130k without it. The bigger replies filled the
+  20k context sooner, and the time saved writing went into debugging. The quick
+  selection still passed 5/5.
 
 ---
 
@@ -533,6 +541,28 @@ From the same comparison; none is scheduled.
 
 ## Phase 4 — In-browser models (wllama)
 
+**Before the port** (prepared 2026-10-24; the measurement waits until the GPU is free of
+the reference server):
+- [ ] **Measure the floor first, without wllama.** Run the small GGUFs HermitUI's
+      benchmark already caches (Qwen3-4B, Qwen3.5-4B, Qwen3-8B, all Q4_K_M) on a native
+      llama.cpp server (the CUDA build `hermit-cleaner/bench` pins), through the
+      existing endpoint path: `e2e_reference.py --quick` in both protocols, then the full
+      suite and `e2e_app.py` for any model that passes the quick run. That says whether a
+      model this size can drive the agent at all, before any porting; wllama only adds
+      speed limits on top (HermitUI's benchmark has those numbers).
+- [ ] The same runs answer **Auto's protocol choice**: on Qwen3.8-27B code-as-action was
+      faster and as accurate as native tool calls (Phase 3.7 Result); if a second model
+      agrees, Auto should prefer code-as-action.
+- [ ] Record whether small models send a plan (`plans`) and how often the loop guard
+      fires (`repeat` steps), and how big the prompt is in tokens: pi keeps its system
+      prompt and tools under 1,000; ours is several times that.
+
+**Then the port:**
+- [ ] Code-as-action as the default for the in-browser engine: it needs no tool-call
+      template support, and it was the faster protocol even on the 27B model.
+- [ ] Keep the prompt prefix byte-identical between steps (already true for the server's
+      cache) so wllama can reuse its KV cache: prompt processing is its bottleneck
+      (HermitUI measured ~40 s to the first token for Gemma-4 E2B on CPU).
 - [ ] Bring over HermitUI's wllama loading (local file / URL into an in-memory Blob,
       Memory64, WebGPU), inside marker blocks for a separate output.
 - [ ] Agent prompt tuning for small models. Run the Phase 2a success measurement per
