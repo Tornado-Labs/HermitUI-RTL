@@ -163,7 +163,13 @@ poll with `page.evaluate` instead.
   a "statt/ohne/um ... zu" part left with its clause (split off, "verbraucht, statt ihn
   einzuspeisen" became "Stattdessen muss man ihn einspeisen", the opposite);
   `acceptSplit` keeps the original sentence when the answer is still one sentence, has a
-  fragment, opens two parts alike, loses a number or changes the length much. `openers`:
+  fragment, opens two parts alike, loses a number or changes the length much. It also
+  counts the words that carry the logic (`SPLIT_KEEP`: "dass", "damit", "ohne", "wenn",
+  "oder", "nicht" ...; "weil" may become "denn" or "deshalb"): fewer of them in the parts
+  means a lost condition or purpose ("ohne dass es schlechter wird" -> "Es wird nicht
+  schlechter"). A part may open with "Deshalb", "Trotzdem" or "Stattdessen" only when the
+  sentence had that link (`SPLIT_LINKS`; "Dabei" never): "verbunden und bleibt" became
+  "verbunden. Deshalb bleibt". `info.splits` is [kept, tried]. `openers`:
   only when a row of sentences opens alike ("Sie sehen ... Sie koennen ..."), one edit
   naming the words. **The German must stay easy to understand:** the single prompt once
   split everything into 3-5 word sentences and lost the logic and sometimes the meaning
@@ -190,7 +196,13 @@ poll with `page.evaluate` instead.
   try with a note: refusing German `words` outright loses most of what Plainer does. The review flags at most a third of the sentences (at most 6), so the
   sentences pass stays an edit. With Rewrite freely the fact checks get the numbers the
   rewrite lost (`missingNumbers`, `24/7` counting as one) and list one only where its
-  point is still there; without it, every lost number is an error.
+  point is still there; without it, every lost number is an error. Two more errors are
+  found in code and go to both fixes: a number the original never had (`addedNumbers`;
+  the free rewrite turned "24/7" into "3 a.m."; written-out numbers up to 99 count as the
+  same, `numberWords`), and a point said twice (`repeatedSentences`: content-word overlap
+  of 60 % past `REPEAT_COMMON`, not a question, not a repeat the original had). Word
+  overlap flags echoes too, so that error asks to say it once "unless the second adds
+  something" and the model decides.
 - **Every prompt** starts with `NO_HIDDEN_MARKS` (`withNoHiddenMarks` in `buildChatBody`,
   `buildRewriteBody` and the in-browser path). The e2e mock (`tests/mock_openai.py`) skips
   that first line when it tells the passes apart.

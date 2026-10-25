@@ -4,7 +4,7 @@ import m from "./extract.mjs";
 import { check, section, report } from "./check.mjs";
 
 const { splitLetterFrame, buildCritiqueMessages, buildWholeRewriteMessages, buildSentenceFixMessages, wholeSpotNotes,
-    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainRuleMessages, buildSplitMessages, acceptSplit, buildOneRuleMessages, WHOLE_PLAIN_EN, WHOLE_PASSES,
+    buildFactCheckMessages, factCheckErrors, buildFactFixMessages, acceptWholeRewrite, wholeRewrite, buildChatBody, missingNumbers, addedNumbers, numberWords, repeatedSentences, buildProofreadMessages, isFactError, copiedSentences, cutFillerSentences, buildPlainRuleMessages, buildSplitMessages, acceptSplit, buildOneRuleMessages, WHOLE_PLAIN_EN, WHOLE_PASSES,
     buildSentenceReviewMessages, buildTextKindMessages, parseTextKind, speakerRule, sameOpenerRun, longSentences } = m;
 
 const BODY_EN = "The Q3 budget review is next Thursday. I will send a full overview of the key figures by Tuesday.\n\n"
@@ -119,6 +119,18 @@ section("missingNumbers");
     check("24/7 is one number", missingNumbers("Open 24/7, since 2021.", "Open day and night, since 2021.").join() === "24/7");
     check("a number written out counts as kept", !missingNumbers("12-hour shifts, 20 percent", "twelve-hour shifts, twenty percent").length
         && !missingNumbers("12 Stunden", "zw\u00f6lf Stunden").length && missingNumbers("12 or 3 people", "a dozen or three").join() === "12" && missingNumbers("8 rooms", "Achtung, rooms").join() === "8");
+    check("compound number words", !addedNumbers("bursts of twenty-five minutes", "bursts of 25 minutes").length && !addedNumbers("einundzwanzig Tage", "21 Tage").length
+        && !missingNumbers("47 Seiten", "siebenundvierzig Seiten").length && numberWords("30") === "thirty|drei\u00dfig" && numberWords("3.5") === "" && numberWords("120") === "");
+    {
+        const APP = "Downloading the app update by March 25 will ensure your key fob and digital key are synced to the new access system.";
+        const APP2 = "Before the switch, download the latest FitLoop app update by March 25, which links your key fob and digital key to the new access system.";
+        const r = repeatedSentences("Download the app update by March 25. It syncs your key fob.", `Starting April 1, the gym is open around the clock. ${APP}\n\nStaff are there from 6 a.m. to 10 p.m.\n\n${APP2}`);
+        check("a point said twice", r.length === 1 && r[0][0] === APP && r[0][1] === APP2, r);
+        check("not a question, not short sentences, not a repeat the original had", !repeatedSentences("x", "What was your biggest lesson in your first year as a leader? My biggest lesson in my first year as a leader was trust.").length
+            && !repeatedSentences("x", "Plan the route. Plan the route.").length && !repeatedSentences("x", "Mein Team braucht mich weniger wegen meiner konkreten L\u00f6sungen. Es braucht mich wegen meiner Haltung.").length && !repeatedSentences(`${APP} Staff are there. ${APP2}`, `${APP} ${APP2}`).length);
+    }
+    check("a made-up number", addedNumbers("open 24/7, 12-hour shifts", "someone at 3 a.m., twelve-hour shifts, 24/7").join() === "3"
+        && !addedNumbers("twelve-hour shifts", "12-hour shifts").length && !addedNumbers("um 11:00 Uhr", "um 11 Uhr").length);
     check("a full hour is the same time", !missingNumbers("von 11:00 bis 17.00 Uhr, 9.500 kWh", "von 11 bis 17 Uhr, 9.500 kWh").length && missingNumbers("um 11:30", "um 11 Uhr").join() === "11:30");
     check("German dates", missingNumbers(BODY_DE, "am 6. Oktober").join() === "16", missingNumbers(BODY_DE, "am 6. Oktober"));
     check("proofread prompt keeps the casual wording", /casual is not a mistake/.test(buildProofreadMessages("x", "de")[0].content) && buildProofreadMessages("x", "de")[0].content.includes("German"));
@@ -220,6 +232,16 @@ section("wholeRewrite");
     r = await wholeRewrite(LETTER_EN, "en", {}, s.chat);
     check("a lost number goes to the fix, and the report knows it is still missing", s.calls.find(c => c.id === "fix").messages[0].content.includes("the number \"4,500\"")
         && r.info.missing.join() === "4,500", r.info.missing);
+    s = script("OK", { rewrite: REWRITE.replace("by Tuesday", "by Tuesday at 9 a.m."), sentences: SENTENCES.replace("by Tuesday", "by Tuesday at 9 a.m."), fix: SENTENCES });
+    r = await wholeRewrite(LETTER_EN, "en", { free: true }, s.chat);
+    check("a number the rewrite made up goes to the fix", (s.calls.find(c => c.id === "fix") || { messages: [{ content: "" }] }).messages[0].content.includes("\"9\" is not in the original")
+        && !r.body.includes("9 a.m.") && r.info.errors.length === 1, s.calls.map(c => c.id));
+    {
+        const TWICE = SENTENCES + " The Berlin trip came in about 4,500 euros over the original estimate we made.";
+        s = script("OK", { rewrite: REWRITE, sentences: TWICE, fix: SENTENCES });
+        r = await wholeRewrite(LETTER_EN, "en", {}, s.chat);
+        check("a point said twice goes to the fix", (s.calls.find(c => c.id === "fix") || { messages: [{ content: "" }] }).messages[0].content.includes("says again what") && r.info.errors.length === 1, s.calls.map(c => c.id));
+    }
     check("an unchanged proofreading is not reported as skipped", !r.info.passes.some(p => p.id === "proof"));
 
     // Rewrite freely: a plan between critique and rewrite, and a number that went with a
@@ -267,12 +289,35 @@ section("wholeRewrite");
     s = scriptDe({ rewrite: RW_DE + " " + LONG, spots: RW_DE + " " + LONG, words: echo, split: LONG_SPLIT });
     r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
     check("plain de: one split call per long sentence, with only that sentence", s.calls.filter(c => c.id === "split" && c.messages[1].content === LONG).length === 1, s.calls.map(c => c.id));
-    check("plain de: the split goes into the text", r.body === RW_DE + " " + LONG_SPLIT && r.info.passes.some(p => p.id === "split" && p.ok), r.body);
+    check("plain de: the split goes into the text", r.body === RW_DE + " " + LONG_SPLIT && r.info.passes.some(p => p.id === "split" && p.ok) && r.info.splits.join() === "1,2", r.body);
     s = scriptDe({ rewrite: RW_DE + " " + LONG, spots: RW_DE + " " + LONG, words: echo, split: LONG.replace("Wenn", "Falls") });
     r = await wholeRewrite(LETTER_DE, "de", { plain: true }, s.chat);
     check("plain de: a split that is still one sentence keeps the sentence", r.body === RW_DE + " " + LONG && !r.info.passes.some(p => p.id === "split"), r.body);
     check("split prompt: whole sentences, the link, both sides", /Nebensatz .* bleibt an seinem Hauptsatz/.test(buildSplitMessages(LONG)[0].content) && /genau diesen Zusammenhang/.test(buildSplitMessages(LONG)[0].content) && /nie \"dabei\"/.test(buildSplitMessages(LONG)[0].content)
-        && /beh\u00e4lt beide Seiten/.test(buildSplitMessages(LONG)[0].content) && /in der Reihenfolge/.test(buildSplitMessages(LONG)[0].content) && /statt \.\.\. zu/.test(buildSplitMessages(LONG)[0].content) && !/stattdessen/.test(buildSplitMessages(LONG)[0].content) && buildSplitMessages(LONG)[1].content === LONG);
+        && /beh\u00e4lt beide Seiten/.test(buildSplitMessages(LONG)[0].content) && /in der Reihenfolge/.test(buildSplitMessages(LONG)[0].content) && /statt \.\.\. zu/.test(buildSplitMessages(LONG)[0].content) && /\"damit\"/.test(buildSplitMessages(LONG)[0].content) && /mit \"oder\" verbunden/.test(buildSplitMessages(LONG)[0].content) && !/stattdessen/.test(buildSplitMessages(LONG)[0].content) && buildSplitMessages(LONG)[1].content === LONG);
+    // Real splits: the first six lost a link, an "oder", a purpose, an "ohne", a "dass" or invented a link; the last two keep the logic.
+    const SPLIT_BAD = [
+        ["Wer im Verein aktiv ist, f\u00fchlt sich dem Ort verbunden und bleibt auch dann, wenn die wirtschaftlichen Aussichten schlecht sind.",
+            "Wer im Verein aktiv ist, f\u00fchlt sich dem Ort verbunden. Deshalb bleibt er auch dann, wenn die wirtschaftlichen Aussichten schlecht sind."],
+        ["Was tags\u00fcber \u00fcbrig bleibt, kann ins Netz eingespeist oder in einem Batteriespeicher zwischengelagert werden, um es abends zu nutzen.",
+            "Was tags\u00fcber \u00fcbrig bleibt, kann ins Netz eingespeist werden. Es kann in einem Batteriespeicher zwischengelagert werden, um es abends zu nutzen."],
+        ["Eine gr\u00fcndliche Vorbereitung ist daher essenziell, damit man selbstbewusst auftritt und fair verhandeln kann.",
+            "Eine gr\u00fcndliche Vorbereitung ist daher essenziell. Man tritt selbstbewusst auf und kann fair verhandeln."],
+        ["Wer genau wei\u00df, was ihm im Paket am wichtigsten ist, kann im Gespr\u00e4ch abw\u00e4gen, wo er nachgeben kann, ohne dass es am Ende schlechter wird.",
+            "Wer genau wei\u00df, was ihm im Paket am wichtigsten ist, kann im Gespr\u00e4ch abw\u00e4gen, wo er nachgeben kann. Es wird am Ende nicht schlechter."],
+        ["Dabei kommt es darauf an, dass man sich direkt gegen\u00fcbersteht und spricht, weil man sich das \u00fcber Chat-Apps oder soziale Medien h\u00e4ufiger spart.",
+            "Man sollte sich direkt gegen\u00fcberstehen und sprechen. Denn man spart sich das \u00fcber Chat-Apps oder soziale Medien h\u00e4ufiger."],
+        ["Ich habe versucht, jeden Prozess selbst zu steuern, und habe so kaum Raum f\u00fcr Fehler gelassen.",
+            "Ich habe versucht, jeden Prozess selbst zu steuern. Dabei habe ich kaum Raum f\u00fcr Fehler gelassen."],
+    ];
+    const SPLIT_OK = [
+        ["Diese Zahlen sollte man aber nicht heilig nehmen, da sie nur wertvolle Einblicke in die \u00fcblichen Spannen bieten.",
+            "Diese Zahlen sollte man aber nicht heilig nehmen. Denn sie bieten nur wertvolle Einblicke in die \u00fcblichen Spannen."],
+        ["Weil sich die Menschen zunehmend in digitalen R\u00e4umen bewegen und der direkte Kontakt selten wird, wird diese physische Pr\u00e4senz wichtig.",
+            "Die Menschen bewegen sich zunehmend in digitalen R\u00e4umen. Der direkte Kontakt wird selten. Deshalb wird diese physische Pr\u00e4senz wichtig."],
+    ];
+    SPLIT_BAD.forEach(([a, b], i) => check(`acceptSplit refuses a split that loses the logic (${i + 1})`, acceptSplit(a, b) === null));
+    SPLIT_OK.forEach(([a, b], i) => check(`acceptSplit keeps a split with the same logic (${i + 1})`, acceptSplit(a, b) === b));
     check("acceptSplit: two whole sentences", acceptSplit(LONG, LONG_SPLIT) === LONG_SPLIT && acceptSplit(LONG, "\"" + LONG_SPLIT + "\"") === LONG_SPLIT);
     check("acceptSplit: one sentence, a fragment, the same opening, a lost number", acceptSplit(LONG, LONG) === null && acceptSplit(LONG, LONG_SPLIT.replace("Das senkt die administrativen H\u00fcrden f\u00fcr beide Seiten deutlich.", "Das senkt H\u00fcrden."))
         === null && acceptSplit(LONG, LONG_SPLIT.replace(". Das senkt", ". Wenn das senkt")) === null && acceptSplit("Ab 1. Mai gilt das 2 Wochen lang f\u00fcr alle, die bei uns ein Konto haben und es auch nutzen wollen, weil es dann einfacher ist.", "Ab Mai gilt das zwei Wochen lang f\u00fcr alle mit Konto. Denn dann ist es einfacher f\u00fcr alle, die es nutzen.") === null);

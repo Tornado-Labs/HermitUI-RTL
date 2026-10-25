@@ -736,7 +736,7 @@ body.is-running .options {
 // counting, so keep literal braces out of their regexes, strings and comments); the
 // DOM wiring is at the bottom.
 
-const APP_VERSION = "0.4.5";
+const APP_VERSION = "0.4.6";
 
 // ========== Stage 1: character cleanup ==========
 
@@ -2018,15 +2018,31 @@ function plainOpenerRule(words) {
 function buildSplitMessages(sentence) {
     return [
         { role: "system", content: "Teile den Satz in zwei, h\u00f6chstens drei vollst\u00e4ndige S\u00e4tze, ohne den Inhalt zu \u00e4ndern. "
-            + "Jeder neue Satz hat sein eigenes Verb und ist allein verst\u00e4ndlich; ein Nebensatz mit \"dass\", \"weil\", \"wenn\", \"was\" oder \"der\", \"die\", \"das\" bleibt an seinem Hauptsatz, ebenso ein Teil mit \"statt ... zu\", \"ohne ... zu\" oder \"um ... zu\". "
+            + "Jeder neue Satz hat sein eigenes Verb und ist allein verst\u00e4ndlich; ein Nebensatz mit \"dass\", \"damit\", \"ob\", \"ohne dass\", \"weil\", \"wenn\", \"was\" oder \"der\", \"die\", \"das\" bleibt an seinem Hauptsatz, ebenso ein Teil mit \"statt ... zu\", \"ohne ... zu\" oder \"um ... zu\", und was mit \"oder\" verbunden ist, bleibt in einem Satz. "
             + "Hatte der Satz ein Wort, das zeigt, wie seine Teile zueinander stehen (\"weil\", \"aber\", \"deshalb\", \"weniger ... als\"), beginnt der neue Satz mit einem Wort, das genau diesen Zusammenhang zeigt (\"denn\", \"aber\", \"deshalb\"); sonst beginnt er ohne so ein Wort. Nimm nie \"dabei\" als Verbindung. "
             + "Die Aussagen bleiben in der Reihenfolge, in der sie im Satz stehen. Ein Gegensatz beh\u00e4lt beide Seiten. Zwei S\u00e4tze hintereinander beginnen nicht mit demselben Wort. "
             + "Anrede, Zahlen, Namen und Daten bleiben genau gleich; nichts kommt dazu. Antworte nur mit den S\u00e4tzen." },
         { role: "user", content: String(sentence).trim() },
     ];
 }
+// Words that carry a split sentence's logic, each with the words that may stand for it
+// in the parts ("weil" -> "denn", "deshalb"): a split that has fewer of them lost a
+// condition, a purpose, an "oder" or a "nicht" ("ohne dass es schlechter wird" ->
+// "Es wird nicht schlechter").
+const SPLIT_KEEP = [
+    ["dass", "dass"], ["damit", "damit"], ["ohne", "ohne"], ["statt|anstatt", "statt|anstatt"], ["wenn|falls|sofern", "wenn|falls|sofern"], ["ob", "ob"], ["oder", "oder"],
+    ["nicht|kein|keine|keinen|keinem|keiner|keines|nie|niemals|nichts|niemand", "nicht|kein|keine|keinen|keinem|keiner|keines|nie|niemals|nichts|niemand"],
+    ["obwohl|obgleich", "obwohl|obgleich|trotzdem|dennoch|aber|doch|zwar"], ["weil", "weil|denn|deshalb|daher|darum|deswegen|n\u00e4mlich"], ["sodass", "sodass|deshalb|daher|dadurch|so"],
+];
+// A part may open with a link word only when the sentence had that link.
+const SPLIT_LINKS = [
+    ["deshalb|daher|darum|deswegen|denn", "weil|da|denn|deshalb|daher|darum|deswegen|sodass|dadurch|n\u00e4mlich"],
+    ["trotzdem|dennoch", "obwohl|obgleich|trotzdem|dennoch|aber|doch|zwar"], ["stattdessen", "statt|anstatt|sondern|stattdessen"], ["dabei", "(?!)"],
+];
+
 // The split of `sentence` in `reply`, or null: two or three sentences of four words or
-// more, not opening alike, every number kept, about as long as the sentence.
+// more, not opening alike, every number and logic word kept (SPLIT_KEEP), no link word
+// the sentence did not have (SPLIT_LINKS), about as long as the sentence.
 function acceptSplit(sentence, reply) {
     const s = String(sentence || "").trim();
     let t = stripThinking(reply).replace(/\s+/g, " ").trim();
@@ -2037,6 +2053,9 @@ function acceptSplit(sentence, reply) {
     if (parts.length < 2 || parts.length > 3 || parts.some(p => words(p) < 4)) return null;
     if (parts.some((p, i) => i && first(p) === first(parts[i - 1]))) return null;
     if (missingNumbers(s, t).length || PREAMBLE_RE.test(t)) return null;
+    const count = (x, alt) => (x.match(new RegExp(`(?<![\\p{L}])(?:${alt})(?![\\p{L}])`, "giu")) || []).length;
+    if (SPLIT_KEEP.some(([a, b]) => count(t, b) < count(s, a))) return null;
+    if (parts.some((p, i) => i && SPLIT_LINKS.some(([a, b]) => count(first(p), a) && !count(s, b)))) return null;
     const r = words(t) / Math.max(1, words(s));
     return r >= 0.75 && r <= 1.4 ? t : null;
 }
@@ -2408,12 +2427,47 @@ function buildFactCheckMessages(orig, text, lang, details, free, gone) {
 // written out in `text` ("twelve-hour" for "12-hour", "zw\u00f6lf") counts as kept; 1 is left
 // out, "one" and "ein" being everywhere.
 const NUMBER_WORDS = { 2: "two|zwei", 3: "three|drei", 4: "four|vier", 5: "five|f\u00fcnf", 6: "six|sechs", 7: "seven|sieben", 8: "eight|acht", 9: "nine|neun", 10: "ten|zehn", 11: "eleven|elf", 12: "twelve|zw\u00f6lf", 13: "thirteen|dreizehn", 14: "fourteen|vierzehn", 15: "fifteen|f\u00fcnfzehn", 16: "sixteen|sechzehn", 17: "seventeen|siebzehn", 18: "eighteen|achtzehn", 19: "nineteen|neunzehn", 20: "twenty|zwanzig", 30: "thirty|drei\u00dfig", 40: "forty|vierzig", 50: "fifty|f\u00fcnfzig", 60: "sixty|sechzig", 70: "seventy|siebzig", 80: "eighty|achtzig", 90: "ninety|neunzig", 100: "a hundred|one hundred|hundert" };
+// The written-out forms of `n`, as a regex alternation, or "": NUMBER_WORDS, and from
+// 21 to 99 the compounds ("twenty-five", "f\u00fcnfundzwanzig").
+function numberWords(n) {
+    const v = Number(n), tens = NUMBER_WORDS[v - v % 10], unit = NUMBER_WORDS[v % 10] || "one|ein";
+    if (NUMBER_WORDS[n] || !(v > 20 && v < 100 && v % 10 && tens)) return NUMBER_WORDS[n] || "";
+    const [te, td] = tens.split("|"), [ue, ud] = unit.split("|");
+    return `${te}[- ]?${ue}|${ud}und${td}`;
+}
+
 function missingNumbers(orig, text) {
     // "11:00" and "11.00" are the same time as "11".
     const nums = s => [...new Set((String(s || "").match(/\d+(?:[.,/:]\d+)*/g) || []).map(n => n.replace(/[:.]00$/, "")))];
     const t = String(text || ""), have = new Set(nums(t));
-    const said = n => NUMBER_WORDS[n] && new RegExp(`(?<![\\p{L}])(?:${NUMBER_WORDS[n]})(?![\\p{L}])`, "iu").test(t);
+    const said = n => numberWords(n) && new RegExp(`(?<![\\p{L}])(?:${numberWords(n)})(?![\\p{L}])`, "iu").test(t);
     return nums(orig).filter(n => !have.has(n) && !said(n));
+}
+
+// Frequent words of five letters or more that say nothing about a sentence's point.
+const REPEAT_COMMON = "nicht nichts keine keinen einem einer eines diese dieser dieses diesem jetzt immer schon wieder sollte sollten sollen m\u00fcssen muss m\u00fcsste k\u00f6nnen kann k\u00f6nnte werden wurde wurden haben hatte hatten waren w\u00e4re durch \u00fcber unter zwischen wegen meiner meine meinen deine eure ihrer unsere unser einfach etwas viele vielen mehrere andere anderen weniger mehr besser gerade dabei damit dann denn deshalb sowie zudem schauen machen geben gehen kommen nehmen \u00e4ndern about after again against because before being below between could doing during every from further having other their there these they those through under until which while would should shall might must where what when whom whose really still often always never something anything everything people things thing great";
+// Pairs of sentences in `text` that say the same thing: of the words of five letters or
+// more (not REPEAT_COMMON), the shorter sentence (four such words at least) shares 60 % with the other. A
+// question is left out (a closing question may echo the opening on purpose), and so is a
+// pair the original also had: saying it twice was the writer's choice.
+function repeatedSentences(orig, text) {
+    const sentences = t => String(t || "").split(/\n\s*\n/).flatMap(p => splitSentences(p).map(([a, b]) => p.slice(a, b).trim()));
+    const common = new Set(REPEAT_COMMON.split(" "));
+    const words = x => new Set((x.toLowerCase().match(/\p{L}{5,}/gu) || []).filter(w => !common.has(w)));
+    const same = (a, b) => Math.min(a.size, b.size) >= 4 && [...a].filter(w => b.has(w)).length / Math.min(a.size, b.size) >= 0.6;
+    const o = sentences(orig).map(words), t = sentences(text).filter(x => !/\?\W*$/.test(x)), w = t.map(words), out = [];
+    for (let i = 0; i < t.length; i++) for (let j = i + 1; j < t.length; j++) {
+        if (!same(w[i], w[j])) continue;
+        const inOrig = o.some((a, k) => same(w[i], a) && o.some((b, l) => l !== k && same(w[j], b)));
+        if (!inOrig) out.push([t[i], t[j]]);
+    }
+    return out;
+}
+
+// The numbers in `text` the original never had ("3 a.m." for "24/7"): the rewrite made
+// them up. A number the original wrote out ("twelve") counts as its own.
+function addedNumbers(orig, text) {
+    return missingNumbers(text, orig);
 }
 
 // A fact-check "error" that is about style, not content (a metaphor, a saying, a
@@ -2606,8 +2660,11 @@ async function wholeRewrite(text, lang, o, chat) {
         // A number the free rewrite dropped may have gone with its point: the fact check
         // gets the list and decides.
         const facts = () => buildFactCheckMessages(orig, cur, lang, o.details, o.free, missingNumbers(orig, cur));
+        // Found in code, not by the model: a number the original never had, a point said twice.
+        const added = () => addedNumbers(orig, cur).map(n => `- "${n}" is not in the original -> take it out, or say what the original says`)
+            .concat(repeatedSentences(orig, cur).map(([a, b]) => `- "${b}" says again what "${a}" says -> say it once, unless the second adds something`));
         info.errors = factCheckErrors(await chat("facts", facts(), notesTokens)).filter(isFactError)
-            .concat(o.free ? [] : missingNumbers(orig, cur).map(n => `- the number "${n}" of the original is missing -> put it back where it belongs`)).slice(0, 12);
+            .concat(o.free ? [] : missingNumbers(orig, cur).map(n => `- the number "${n}" of the original is missing -> put it back where it belongs`), added()).slice(0, 12);
         if (info.errors.length) {
             info.fixed = use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, info.errors), textTokens)).ok;
             // What a second check finds goes to the report, not to another round of fixes.
@@ -2631,9 +2688,11 @@ async function wholeRewrite(text, lang, o, chat) {
             if (lang === "de") {
                 await edit("words", t => buildPlainRuleMessages(t, PLAIN_DE_WORDS));
                 let split = cur;
-                for (const s of longSentences(cur)) {
+                const long = longSentences(cur);
+                info.splits = [0, long.length];
+                for (const s of long) {
                     const t = acceptSplit(s, await chat("split", buildSplitMessages(s), Math.min(600, 64 + s.length)));
-                    if (t) split = split.replace(s, () => t);
+                    if (t) { split = split.replace(s, () => t); info.splits[0]++; }
                 }
                 if (split !== cur) use("split", split);
                 const run = [sameOpenerRun(cur), sameOpenerRun(cur, 1)].find((r, i) => r.n >= (i ? 3 : 2));
@@ -2644,7 +2703,7 @@ async function wholeRewrite(text, lang, o, chat) {
                 info.kind = kind ? TEXT_KINDS[kind].id : null;
                 for (const p of WHOLE_PLAIN_EN) await edit(p.id, t => buildOneRuleMessages(t, p.id === "speaker" && kind ? speakerRule(kind) : p.rule), think);
             }
-            const errs = factCheckErrors(await chat("facts", facts(), notesTokens)).filter(isFactError).slice(0, 12);
+            const errs = factCheckErrors(await chat("facts", facts(), notesTokens)).filter(isFactError).concat(added()).slice(0, 12);
             if (errs.length) {
                 info.errors = info.errors.concat(errs);
                 use("fix", await chat("fix", buildFactFixMessages(orig, cur, lang, errs), textTokens));
