@@ -217,6 +217,11 @@ next python step re-seeds it.
 - **Rewind to step N** restores that workspace, truncates the timeline and the model
   history after N, and restarts the interpreter. The user can then retry, edit the
   task, or inject guidance.
+- **✏️ Edit the task** *(v0.3.17, after opencode's `/undo`)*: rewinding to the task card
+  offers it next to ⏪ Rewind. The workspace goes back to the task's start (files keep the
+  origin they had then), the session starts afresh (no timeline, history or
+  checkpoints), and the task text is put back into the composer, to be rephrased and
+  sent as a new start.
 - Checkpoints live in memory only. They leave the tab only via session export (§3).
 - **➕ New** clears the timeline, the model history, the checkpoints and the interpreter.
   When the workspace has files it offers to keep them: kept files become user files

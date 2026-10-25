@@ -307,6 +307,10 @@ plt.figure(); plt.plot([1, 1])
             *[py(f"print('t{i}')") for i in range(1, 16)],
             final("Done."),
         ],
+        "E2E-RETASK": [
+            py("open('made.txt', 'w').write('x')"),
+            final("Done."),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -1985,6 +1989,32 @@ def thrash_scenario(browser, port, state):
     page.context.close()
 
 
+def edit_task_scenario(browser, port, state):
+    print("— rewind to the task: Edit the task puts it back in the composer, workspace as at the start")
+    page = open_app(browser)
+    configure(page, port, 10)
+    page.select_option("#autonomySelect", "autopilot")
+    page.fill("#taskInput", "E2E-RETASK: make a file")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "edit task done")
+    check("the task wrote a file", "made.txt" in [p for p, h, o in workspace(page)])
+    page.locator('[data-idx="0"] [data-action=rewind]').click()
+    check("rewinding to the task offers Edit the task", page.is_visible("#confirmAlt") and "Edit the task" in page.inner_text("#confirmAlt"))
+    page.click("#confirmAlt")
+    wait_until(page, "() => S.status === 'idle' && PY.state === 'idle'", 60, "edit task")
+    check("the task is back in the composer", page.input_value("#taskInput") == "E2E-RETASK: make a file", page.input_value("#taskInput"))
+    check("…the session starts afresh", page.evaluate("() => [S.task, S.timeline.length, S.messages.length]") == ["", 0, 0])
+    check("…and the workspace is as at the start", "made.txt" not in [p for p, h, o in workspace(page)])
+    page.fill("#taskInput", "E2E-RETASK: make the file again")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "edited task done")
+    check("sending it starts the task anew", page.evaluate("() => [S.task, S.stepCount]") == ["E2E-RETASK: make the file again", 2])
+    page.locator('[data-idx="1"] [data-action=rewind]').click()
+    check("a step's rewind has no Edit the task", page.is_hidden("#confirmAlt"))
+    page.click("#confirmCancel")
+    page.context.close()
+
+
 MD_REPORT = """# Report
 
 Some **bold** text.
@@ -2104,7 +2134,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("edit_task", edit_task_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

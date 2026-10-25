@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.16";
+const APP_VERSION = "0.3.17";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -5036,9 +5036,13 @@ async function rewindTo(idx) {
     if (!item || !Number.isInteger(item.checkpoint) || !CHECKPOINTS[item.checkpoint]) return;
     if (RUN.active) { showToast("Stop the agent before rewinding."); return; }
     const label = item.type === "task" ? "the start of the task" : `step ${item.n}`;
-    if (!(await confirmDialog(`Rewind to ${label}? Everything after it is removed from the timeline, the workspace is restored to that point, and the interpreter restarts.`, "⏪ Rewind"))) return;
+    // At the task, "Edit the task" (after opencode's /undo) also takes the task back into
+    // the composer, to be rephrased and sent again as a new start.
+    const choice = await confirmDialog(`Rewind to ${label}? Everything after it is removed from the timeline, the workspace is restored to that point, and the interpreter restarts.`, "⏪ Rewind", item.type === "task" ? "✏️ Edit the task" : "");
+    if (!choice) return;
     const ci = item.checkpoint;
     const cp = CHECKPOINTS[ci];
+    if (choice === "alt") { editTask(item.text, cp); return; }
     S.timeline.length = cp.timelineLength;
     // A checkpoint from before a compaction: bring back the history it replaced (with
     // today's system prompt, which Settings may have changed since).
@@ -5064,6 +5068,28 @@ async function rewindTo(idx) {
     setStatus("paused");
     renderTimeline();
     renderWorkspace();
+}
+
+// Rewind to before the task and put its text back in the composer: the workspace is as
+// it was when the task started, and the session starts afresh once it is sent again.
+function editTask(text, cp) {
+    S = freshSession();
+    CHECKPOINTS = [];
+    WS.files = new Map(Object.entries(cp.files).map(([p, f]) => [p, { hash: f.hash, origin: f.origin }]));
+    WS.version++;
+    WS.lastChanged = new Set();
+    collectGarbage();
+    RUN.modelNotes = [];
+    RUN.compactAfter = 0;
+    RUN.compactNext = false;
+    RUN.listedKey = "";
+    restartInterpreter();
+    renderTimeline();
+    renderWorkspace();
+    setStatus("idle");
+    $("taskInput").value = text || "";
+    $("taskInput").focus();
+    showToast("✏️ The task is back in the box: change it and send it again.");
 }
 
 // ========== 9. UI ==========

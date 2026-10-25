@@ -449,6 +449,14 @@ From comparing pi, opencode and Claude Code (opencode's `doom_loop`).
 - ⭐ **Pause rather than keep going without compaction**, since the next request would
   overflow anyway; the note names the fix (context size, or less output).
 
+## Edit the task (v0.3.17, 2026-10-24), decided while building it
+
+- ⭐ **A new start, not an edit in place.** The edited task starts a fresh session with
+  the workspace as it was at the start. Alternative: replace the task message and keep
+  the session, which leaves a timeline that answers a task nobody sent.
+- **Only on the task card.** A follow-up can't be edited this way; rewinding to the step
+  before it and sending a new follow-up does the same.
+
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 
 - ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a

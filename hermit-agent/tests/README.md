@@ -315,6 +315,9 @@ it stall, on cue; see its docstring):
 25. **The compaction thrash guard** (`thrash`): with the mock's context always past the
     threshold, three compactions within four steps pause the run with a note naming
     the context size; Continue resumes it.
+26. **Edit the task** (`edit_task`): rewinding to the task card offers ✏️ Edit the task
+    (a step's rewind doesn't); it puts the task text back in the composer, empties the
+    session, restores the workspace to the start, and sending starts the task anew.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters

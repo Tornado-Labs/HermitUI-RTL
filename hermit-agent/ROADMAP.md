@@ -491,8 +491,8 @@ public docs. Each is a small patch release of its own.
 - [x] **A compaction thrash guard** (Claude Code stops auto-compacting when the context
       refills right after each summary; DESIGN §5.4, v0.3.16): pause instead of compacting
       every step.
-- [ ] **Rewind to the start gives the task back** (opencode's `/undo`): the task text goes
-      back into the composer, to be rephrased.
+- [x] **Rewind to the start gives the task back** (opencode's `/undo`; v0.3.17): the
+      task text goes back into the composer, to be rephrased.
 - [ ] **Plan first** (opencode's Plan agent, Claude Code's plan mode): an autonomy level
       where the agent may only read, search and send a plan until the user approves it.
 - **Not taken, for now:** branches instead of a cut on rewind (pi's session tree, Claude
