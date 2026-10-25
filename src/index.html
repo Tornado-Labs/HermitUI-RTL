@@ -240,7 +240,7 @@
                 <summary>System prompt</summary>
                 <label for="settingSystem" class="visually-hidden">System Prompt</label>
                 <!-- Filled from the active persona whenever the modal opens; a hardcoded prompt here would only drift. -->
-                <textarea id="settingSystem"></textarea>
+                <textarea id="settingSystem" dir="auto"></textarea>
             </details>
             <div class="modal-actions">
                 <button class="cancel-btn" id="settingsCancel">Cancel</button>
@@ -280,10 +280,10 @@
                             <input type="file" id="file-upload" multiple accept="image/png,image/jpeg,image/gif,image/webp,text/*,.txt,.md,.markdown,.rst,.log,.csv,.tsv,.json,.jsonc,.json5,.xml,.yml,.yaml,.toml,.ini,.cfg,.conf,.env,.properties,.js,.mjs,.cjs,.jsx,.ts,.tsx,.vue,.svelte,.html,.htm,.css,.scss,.sass,.less,.py,.rb,.php,.pl,.lua,.r,.c,.h,.cc,.cpp,.hpp,.cxx,.cs,.java,.kt,.kts,.swift,.mm,.go,.rs,.zig,.dart,.scala,.clj,.ex,.exs,.erl,.hs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.diff,.patch" style="display: none;">
                         </div>
                         <div id="file-chips" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
-                        <textarea id="context-input" placeholder="Paste text here or drop files into this area..." rows="3"></textarea>
+                        <textarea id="context-input" dir="auto" placeholder="Paste text here or drop files into this area..." rows="3"></textarea>
                     </div>
                     <div class="input-shell">
-                        <textarea id="userInput" placeholder="Ask me anything... (Shift+Enter for new line)" rows="1" autocomplete="off" autofocus></textarea>
+                        <textarea id="userInput" dir="auto" placeholder="Ask me anything... (Shift+Enter for new line)" rows="1" autocomplete="off" autofocus></textarea>
                         <!-- Controls live inside the shell so the textarea keeps the full width,
                              and wrap onto a second row on narrow screens instead of overflowing. -->
                         <div class="composer-toolbar">

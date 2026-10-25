@@ -37,7 +37,15 @@
         // annotation where it belongs. tests/e2e_rendering.py asserts the TeX never paints.
         const AI_SANITIZE = { ADD_TAGS: ["semantics", "annotation"] };
 
-        // Two rules applied to every sanitized fragment:
+        // Text blocks pick their own direction, so Persian/Arabic/Hebrew answers read
+        // right-to-left (list markers included) while English stays left-to-right.
+        // Lists and tables are set as a whole and their items inherit, so one Latin item
+        // doesn't move its marker or column to the other side. Code is pinned LTR; its
+        // dir attribute also makes dir="auto" skip it, so a paragraph that opens with
+        // `inline code` is still judged by its prose.
+        const AUTO_DIR_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "OL", "UL", "DL", "TABLE"]);
+
+        // Three rules applied to every sanitized fragment:
         //  - Links open in a new tab. Nothing here is saved anywhere, so a same-tab
         //    navigation away from the page destroys the conversation with no way back.
         //  - Remote images are held back. Rendering one is an outbound request from an app
@@ -45,7 +53,13 @@
         //    in context (or a hostile model) must not be able to beacon out by emitting
         //    ![](https://…?data=…). Locally-read attachments are data:/blob: and unaffected;
         //    a held-back image is one click away via wireBlockedImages().
+        //  - Text direction, see AUTO_DIR_TAGS.
         DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+            if (node.tagName === "PRE" || node.tagName === "CODE") {
+                node.setAttribute("dir", "ltr");
+            } else if (AUTO_DIR_TAGS.has(node.tagName) && !node.hasAttribute("dir")) {
+                node.setAttribute("dir", "auto");
+            }
             if (node.tagName === "A" && node.hasAttribute("href")) {
                 node.setAttribute("target", "_blank");
                 node.setAttribute("rel", "noopener noreferrer");
@@ -2307,7 +2321,7 @@ Rules:
                         files.forEach(f => {
                             combinedSafeContext += `--- ${escapeHtml(f.name)} ---\n` + escapeHtml(f.content) + "\n\n";
                         });
-                        uiText = `<details class="attached-context"><summary>📎 Attached Context</summary><pre>${combinedSafeContext.trim()}</pre></details>` + uiText;
+                        uiText = `<details class="attached-context" dir="ltr"><summary>📎 Attached Context</summary><pre>${combinedSafeContext.trim()}</pre></details>` + uiText;
                     }
                     appendMessage("You", DOMPurify.sanitize(uiText), "user", "🧑‍💻", true,
                         { text, contextText, files }, uid);
@@ -2655,6 +2669,7 @@ Rules:
                         
                         const content = document.createElement('div');
                         content.className = 'think-content';
+                        content.dir = 'auto';
                         details.appendChild(content);
                         
                         ctx.responseContainer.appendChild(details);
@@ -3390,7 +3405,7 @@ Rules:
                         combinedSafeContext += `--- ${escapeHtml(f.name)} ---\n` + escapeHtml(f.content) + "\n\n";
                     });
                     // Styled via the .attached-context rules in style.css (theme-aware).
-                    uiText = `<details class="attached-context"><summary>📎 Attached Context</summary><pre>${combinedSafeContext.trim()}</pre></details>` + uiText;
+                    uiText = `<details class="attached-context" dir="ltr"><summary>📎 Attached Context</summary><pre>${combinedSafeContext.trim()}</pre></details>` + uiText;
                 }
                 if (imageFiles.length > 0) {
                     // src is a locally-read/re-encoded data URL; alt is escaped filename.
@@ -3504,6 +3519,9 @@ Rules:
             contentDiv.className = "msg-content";
             contentDiv.id = contentId;
             if (cssClass === "user") {
+                // The attached-context block carries dir="ltr", which dir="auto" skips,
+                // so only the typed text decides the bubble's direction.
+                contentDiv.dir = "auto";
                 if (isRawHtml) {
                     contentDiv.innerHTML = text;
                 } else {

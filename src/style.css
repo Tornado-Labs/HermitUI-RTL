@@ -278,6 +278,11 @@
         
         .msg-content p { margin-bottom: 16px; }
         .msg-content p:last-child { margin-bottom: 0; }
+        /* The reset above zeroes list padding, and .msg-content clips overflow, so the
+           markers were cut off. Logical side, so an RTL list indents from the right. */
+        .msg-content :is(ol, ul) { padding-inline-start: 1.6em; margin-bottom: 16px; }
+        .msg-content :is(ol, ul):last-child { margin-bottom: 0; }
+        .msg-content li > :is(ol, ul) { margin-bottom: 0; }
 
         pre { 
             background: #f6f8fa; 

@@ -107,10 +107,34 @@ def main():
         }""")
         check("a max-tokens cutoff is announced", "Cut off at the max-tokens limit" in shown, repr(shown))
 
+        section("text direction follows the script, code stays LTR")
+        # Asserted on the computed direction, not the attribute: dir="auto" only proves
+        # anything once the browser has resolved it.
+        dirs = page.evaluate("""(md) => {
+            const h = document.createElement('div');
+            document.getElementById('chatbox').appendChild(h);
+            updateMessageUI({ fullRawText: md, aiReasoning: "", startTime: Date.now(), responseContainer: h }, true);
+            const d = (sel) => getComputedStyle(h.querySelector(sel)).direction;
+            return { p: d('p'), ol: d('ol'), li2: d('ol li:nth-child(2)'), en: d('ul'),
+                     lead: d('p:nth-of-type(2)'), pre: d('pre'), code: d('p code') };
+        }""", "سلام دنیا، این یک **پاسخ** است.\n\n`npm` را نصب کنید.\n\n"
+              "1. مورد اول\n2. second item in English\n\n- plain English list\n\n```js\nlet x = 1;\n```")
+        check("Persian paragraph is RTL", dirs["p"] == "rtl", dirs)
+        check("Persian list is RTL, markers on the right", dirs["ol"] == "rtl", dirs)
+        check("a Latin item inherits its list's direction", dirs["li2"] == "rtl", dirs)
+        check("English list stays LTR", dirs["en"] == "ltr", dirs)
+        check("leading inline code doesn't flip a Persian paragraph", dirs["lead"] == "rtl", dirs)
+        check("code block stays LTR", dirs["pre"] == "ltr", dirs)
+        check("inline code stays LTR", dirs["code"] == "ltr", dirs)
+        page.fill("#userInput", "سلام")
+        check("composer follows the typed script",
+              page.evaluate("getComputedStyle(document.getElementById('userInput')).direction") == "rtl")
+        page.fill("#userInput", "")
+
         section("an invalid diagram degrades to a code block")
         r = render("```mermaid\nnot a real diagram {{{\n```")
         page.wait_for_timeout(500)
-        check("invalid mermaid stays a code block", "<pre>" in r["html"], r["html"][:160])
+        check("invalid mermaid stays a code block", "<pre" in r["html"], r["html"][:160])
 
         section("New Chat asks before discarding, and clears the composer")
         page.fill("#userInput", "draft")
