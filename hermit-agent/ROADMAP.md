@@ -488,8 +488,9 @@ public docs. Each is a small patch release of its own.
       identical action in a row isn't run, a fourth pauses the run.
 - [x] **Compaction with a focus** (Claude Code's `/compact <focus>`; v0.3.15): what the
       summary should keep, typed when compacting by hand.
-- [ ] **A compaction thrash guard** (Claude Code stops auto-compacting when the context
-      refills right after each summary): pause instead of compacting every step.
+- [x] **A compaction thrash guard** (Claude Code stops auto-compacting when the context
+      refills right after each summary; DESIGN §5.4, v0.3.16): pause instead of compacting
+      every step.
 - [ ] **Rewind to the start gives the task back** (opencode's `/undo`): the task text goes
       back into the composer, to be rephrased.
 - [ ] **Plan first** (opencode's Plan agent, Claude Code's plan mode): an autonomy level

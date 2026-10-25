@@ -736,6 +736,14 @@ The step card says it was sent, and the debug console logs it.
 - **Timeline:** a 🗜️ card shows the step range, the token estimate before and after, and
   the summary (sanitized Markdown). The status bar shows "compacting history…". Stop
   aborts it.
+- **Thrash guard** *(v0.3.16, after Claude Code, which stops auto-compacting when the
+  context refills right after each summary)*: when the last 3 automatic compactions all
+  came within 4 steps (`compactionThrashing`, `LIMITS.thrashCompactions`/`thrashSteps`),
+  the run pauses with a note saying the context fills up again right after each summary,
+  and what to change (a larger context size, or a note asking the agent to print less).
+  Continue resumes; that note (`thrash: true`, kept by export) starts the count afresh.
+  Manual compactions don't count. Without it, a context too small for one step's output
+  spends a summariser request on nearly every step.
 - **Rewind:** `session.compactions[i].before` keeps the full history each compaction
   replaced, and a checkpoint records its `epoch` (the number of compactions so far).
   Rewinding to an earlier epoch restores that history first, then truncates it as usual.
@@ -904,6 +912,8 @@ update_plan({"plan": [{"step": "Read data.csv", "status": "completed"}, …]})  
 A model that is stuck tends to send the same action again, and each try costs a turn
 (after opencode's `doom_loop` permission, which asks when one tool call repeats three
 times with the same input). Small in-browser models (Phase 4) do it more.
+- The compaction thrash guard, the other "stop a run that's going nowhere" check, is in
+  §5.4.
 - **What counts:** a step's action as a string (`actionSignature`): its code (trimmed),
   or its file actions with their arguments (native call ids don't count). Steps that run
   nothing have none. `repeatsBefore` counts the steps right before this one with the same

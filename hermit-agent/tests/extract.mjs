@@ -59,7 +59,7 @@ const FUNCS = [
     "awaitsModel", "copyMessage", "agentToolDefs", "resolveProtocol", "toolSupportFromProps", "toolSupportFromOllamaShow", "findListedModel",
     "toolSupportFromModelList", "looksLikeToolRejection", "fallbackToolCallId", "toolCallToFileAction", "cleanAskOptions", "splitAskOptions", "parseToolCalls", "toolCallAsText", "parsePartialJson",
     "messageAsText", "toolHistoryAsText", "fileCallResults", "noActionAdvice", "strayTagNote",
-    "cleanPlan", "parsePlanText", "extractPlan", "formatPlan", "planProgress", "planReminder", "currentPlan", "parseReplyText", "actionSignature", "repeatsBefore", "repeatAdvice",
+    "cleanPlan", "parsePlanText", "extractPlan", "formatPlan", "planProgress", "planReminder", "currentPlan", "parseReplyText", "actionSignature", "repeatsBefore", "repeatAdvice", "compactionThrashing",
 ];
 
 const mod = `

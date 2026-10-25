@@ -303,6 +303,10 @@ plt.figure(); plt.plot([1, 1])
             *[calls(("run_python", {"code": "print('same')"})) for _ in range(3)],
             calls(("finish", {"answer": "Stopped repeating."})),
         ],
+        "E2E-THRASH": [
+            *[py(f"print('t{i}')") for i in range(1, 16)],
+            final("Done."),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -1959,6 +1963,28 @@ def repeat_scenario(browser, port, state):
     page.context.close()
 
 
+def thrash_scenario(browser, port, state):
+    print("— the compaction thrash guard: compacting nearly every step pauses the run")
+    page = open_app(browser)
+    configure(page, port, 10)
+    page.click("#settingsBtn")
+    page.fill("#settingAutoCompact", "75")
+    page.fill("#settingContextSize", "100")   # the mock reports 100 prompt tokens: due whenever 2 steps can go
+    page.click("#settingSave")
+    page.fill("#taskInput", "E2E-THRASH: print many")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'paused'", 90, "paused by the thrash guard")
+    comps = page.evaluate("() => S.timeline.filter(t => t.type === 'compaction').length")
+    note = page.evaluate("() => (S.timeline.filter(t => t.type === 'note' && t.thrash).pop() || {}).text || ''")
+    check("three compactions close together pause the run", comps == 3 and "compacted 3 times within 4 steps" in note, (comps, note))
+    check("…the note says what to change", "Raise the context size" in note and "Continue" in note)
+    steps = page.evaluate("() => S.stepCount")
+    page.click("#continueBtn")
+    wait_until(page, f"() => S.stepCount > {steps} && !RUN.active", 60, "continued after the pause")
+    check("Continue resumes, counting afresh", page.evaluate("() => S.stepCount") > steps)
+    page.context.close()
+
+
 MD_REPORT = """# Report
 
 Some **bold** text.
@@ -2078,7 +2104,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

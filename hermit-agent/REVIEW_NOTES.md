@@ -440,6 +440,15 @@ From comparing pi, opencode and Claude Code (opencode's `doom_loop`).
 - ⭐ **The focus may push the summary past its 400 words**, since the user asked for
   detail. Alternative: keep the cap and let the focus crowd out other sections.
 
+## The compaction thrash guard (v0.3.16, 2026-10-24), decided while building it
+
+- ⭐ **3 automatic compactions within 4 steps pause the run.** That is a summary used up
+  within about one step. Compacting every 3 steps, as the 10k-context runs of 2026-10-24
+  did (5 in 15 steps), still makes progress and doesn't trigger it. Alternatives: a
+  tighter or looser window; or stop compacting and let the server refuse the prompt.
+- ⭐ **Pause rather than keep going without compaction**, since the next request would
+  overflow anyway; the note names the fix (context size, or less output).
+
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 
 - ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a

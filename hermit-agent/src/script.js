@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.15";
+const APP_VERSION = "0.3.16";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -59,7 +59,7 @@ const BUNDLED_LIBRARIES = {
 const SESSION_FORMAT = "hermit-agent-session";
 // 2: native tool calls (assistant tool_calls, "tool" messages; Phase 3). 1 still reads.
 const SESSION_FORMAT_VERSION = 2;
-const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3, compactFocusChars: 300 };
+const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3, compactFocusChars: 300, thrashCompactions: 3, thrashSteps: 4 };
 const THROTTLE_MS = 80;
 
 // ========== 2. Helpers copied from HermitUI ==========
@@ -893,6 +893,24 @@ function repeatsBefore(timeline, sig) {
 // What the model is told when its action repeats the last `reps` steps and isn't run.
 function repeatAdvice(kind, reps, native) {
     return `This is the same ${kind === "files" ? "set of file actions" : "code"} as your last ${reps} steps, so it was not run again: it would give the same result. Read that result, then try a different approach, or ${native ? "call ask_user" : "ask the user (ask:)"} if you are stuck.`;
+}
+
+// The compaction thrash guard (DESIGN §5.4): true when the last `count` automatic
+// compactions all came within `steps` steps, i.e. the context fills up again right after
+// each summary. The note that paused the run for it (thrash) starts the count afresh.
+function compactionThrashing(timeline, count, steps) {
+    let seen = 0, stepsSince = 0;
+    for (let i = (timeline || []).length - 1; i >= 0; i--) {
+        const t = timeline[i];
+        if (!t) continue;
+        if (t.type === "note" && t.thrash) break;
+        if (t.type === "step") stepsSince++;
+        if (t.type === "compaction" && t.reason !== "manual") {
+            if (stepsSince > steps) break;
+            if (++seen >= count) return true;
+        }
+    }
+    return false;
 }
 
 // The plan the agent is following: the last one a step of the timeline set, as
@@ -3017,7 +3035,7 @@ function validateSession(raw) {
         switch (it.type) {
             case "task": return { type: "task", text: str(it.text), files: strArr(it.files), ts, checkpoint: Number.isInteger(it.checkpoint) ? it.checkpoint : undefined };
             case "user": return { type: "user", text: str(it.text), kind: ["guidance", "answer", "followup"].includes(it.kind) ? it.kind : "guidance", ts };
-            case "note": return { type: "note", text: str(it.text), tone: ["info", "warn", "error"].includes(it.tone) ? it.tone : "info", ts };
+            case "note": return { type: "note", text: str(it.text), tone: ["info", "warn", "error"].includes(it.tone) ? it.tone : "info", ...(it.thrash === true ? { thrash: true } : {}), ts };
             case "error": return { type: "error", text: str(it.text), hint: str(it.hint), ts };
             case "compaction": return { type: "compaction", reason: ["overflow", "context", "manual"].includes(it.reason) ? it.reason : "threshold", fromStep: num(it.fromStep, 0), toStep: num(it.toStep, 0), summary: str(it.summary), tokensBefore: num(it.tokensBefore, 0), tokensAfter: num(it.tokensAfter, 0), ...(str(it.focus) ? { focus: str(it.focus).slice(0, LIMITS.compactFocusChars) } : {}), ts };
             case "step": {
@@ -4331,6 +4349,13 @@ async function agentTurn() {
             const r = await compactHistory(forced ? "context" : "threshold");
             if (r === "stopped") { addNote("⏹ Stopped while compacting the history."); setStatus("stopped"); return "stopped"; }
             if (r === "unreachable") { RUN.compactNext = forced; return endpointDown(RUN.lastError); }
+            // Compacting nearly every step: each summary is used up at once. Pause and say why.
+            if (r === "compacted" && compactionThrashing(S.timeline, LIMITS.thrashCompactions, LIMITS.thrashSteps)) {
+                debugLog("error", `compaction thrash: ${LIMITS.thrashCompactions} compactions within ${LIMITS.thrashSteps} steps, run paused`);
+                addTimelineItem({ type: "note", tone: "warn", thrash: true, text: `🗜️ The history was compacted ${LIMITS.thrashCompactions} times within ${LIMITS.thrashSteps} steps: the context fills up again right after each summary, so the run is paused. Raise the context size in Settings (the server's too, if it's lower), or ask the agent in a note to print less, then Continue.` });
+                setStatus("paused");
+                return "error";
+            }
         }
     }
     setActivity("thinking");

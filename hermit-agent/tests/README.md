@@ -131,7 +131,9 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
 - **`guard.test.mjs`** covers the loop guard (DESIGN §5.8): `actionSignature` (code
   trimmed, file actions without call ids, nothing for a reply that runs nothing),
   `repeatsBefore` (a different action, a note or a compaction in between ends the
-  count), `repeatAdvice` in both protocols, and the limit.
+  count), `repeatAdvice` in both protocols, and the limit; and the compaction thrash
+  guard (`compactionThrashing`: 3 automatic compactions within 4 steps, manual ones
+  don't count, the pause note resets the count and survives an import).
 
 - **`filetools.test.mjs`** covers Phase 3.6 (DESIGN §5.1): the `search_files`,
   `delete_file` and `move_file` tags (quoted `>` in a pattern, a trailing `/`, the whole
@@ -310,6 +312,9 @@ it stall, on cue; see its docstring):
     isn't run and the model is told why; the fourth pauses the run with a note, and
     Continue resumes it. Natively, the third identical `run_python` call gets the reason
     as its result.
+25. **The compaction thrash guard** (`thrash`): with the mock's context always past the
+    threshold, three compactions within four steps pause the run with a note naming
+    the context size; Continue resumes it.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters
