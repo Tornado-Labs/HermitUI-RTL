@@ -425,7 +425,7 @@ are in [REVIEW_NOTES.md](REVIEW_NOTES.md)):
 - **Compaction, rewind, export, import?** Stored on the step that sent it, the current
   plan derived from the timeline; compaction appends it to the compacted task message;
   no new session format.
-- **Small models?** Left to Phase 4; the success measurement records the plans sent.
+- **Small models?** Left to Phase 4; the success measurement records the plans sent. Phase 4's floor run: small models rarely plan with native tool calls, and their text-mode plans go stale.
 
 - [x] `update_plan` in both protocols (DESIGN §5.7): an `<update_plan>` checklist in
       code-as-action, a native tool with `{ step, status }` items, set aside before "the
@@ -499,7 +499,8 @@ public docs. Each is a small patch release of its own.
 - **Not taken, for now:** branches instead of a cut on rewind (pi's session tree, Claude
   Code's fork: a timeline and session-format change, worth it only if rewinding gets
   used a lot); a smaller prompt for small models (pi keeps its prompt and tools under
-  1,000 tokens: measure in Phase 4 first); `apply_patch` (only if gpt-oss becomes the
+  1,000 tokens; measured in Phase 4: ours is 2,900 to 4,000, and the package list is the
+  first thing to shorten); `apply_patch` (only if gpt-oss becomes the
   Phase 4 model, since it is trained on that format); several questions in one
   `ask_user` (opencode's `question`: little gain). pi argues against built-in to-do lists
   ("more state the model must track"); the Phase 3.7 runs found a plan does no harm.
@@ -541,25 +542,62 @@ From the same comparison; none is scheduled.
 
 ## Phase 4 — In-browser models (wllama)
 
-**Before the port** (prepared 2026-10-24; the measurement waits until the GPU is free of
-the reference server):
-- [ ] **Measure the floor first, without wllama.** Run the small GGUFs HermitUI's
+**Before the port** (prepared 2026-10-24, measured 2026-10-25):
+- [x] **Measure the floor first, without wllama.** Run the small GGUFs HermitUI's
       benchmark already caches (Qwen3-4B, Qwen3.5-4B, Qwen3-8B, all Q4_K_M) on a native
       llama.cpp server (the CUDA build `hermit-cleaner/bench` pins), through the
       existing endpoint path: `e2e_reference.py --quick` in both protocols, then the full
       suite and `e2e_app.py` for any model that passes the quick run. That says whether a
       model this size can drive the agent at all, before any porting; wllama only adds
       speed limits on top (HermitUI's benchmark has those numbers).
-- [ ] The same runs answer **Auto's protocol choice**: on Qwen3.8-27B code-as-action was
+- [x] The same runs answer **Auto's protocol choice**: on Qwen3.8-27B code-as-action was
       faster and as accurate as native tool calls (Phase 3.7 Result); if a second model
       agrees, Auto should prefer code-as-action.
-- [ ] Record whether small models send a plan (`plans`) and how often the loop guard
+- [x] Record whether small models send a plan (`plans`) and how often the loop guard
       fires (`repeat` steps), and how big the prompt is in tokens: pi keeps its system
       prompt and tools under 1,000; ours is several times that.
 
+**Floor result** (2026-10-25, v0.3.19 build; llama.cpp b11531 CUDA on the dev machine's
+RTX 5070 Ti, 32k context, one slot, Q4_K_M; two runs per protocol of the full suite for
+Qwen3.5-4B and Qwen3-8B, one for Qwen3-4B; between two runs a model moved by up to 6 tasks
+in text mode and 3 in native mode). Qwen3-4B's second and third quick runs and its full and
+app runs come from a chain meant for the other two models that reached a leftover Qwen3-4B
+server instead; they are Qwen3-4B runs and counted as such:
+
+| Model | Quick (native / text) | Full suite, native | Full suite, text | App task (both) |
+|---|---|---|---|---|
+| Qwen3-4B | 3/5, 3/5, 5/5 / 2/5, 3/5, 2/5 | 16/27, 1.3 min per task | 12/27 | 0/4 |
+| Qwen3.5-4B | 5/5 / 4/5 | **21 + 21 of 54, 0.3 min** | 10 + 16 of 54 | 0/4 |
+| Qwen3-8B | 3/5 / 4/5 | 20 + 17 of 54, 1.3 min | 19 + 17 of 54 | 0/4 |
+| Qwen3.8-27B (3.7 Result) | 5/5 / 4/5 | 80/81 (3 runs) | – | 7/8 (native) |
+
+- **A 4B model can drive the agent on short tasks, not on long ones.** Qwen3.5-4B with
+  native tool calls passes most of the suite and is the fastest model here (it writes
+  short answers). No small model built the app: most runs hit the 20-step limit or paused
+  on the loop guard (Qwen3-8B also needed a compaction there), and Qwen3-4B's text runs
+  stopped after 2 or 3 steps with a broken app. `code + tests` failed in every native run
+  of every model; Qwen3-4B and Qwen3-8B also miss `data processing` most of the time.
+- **Auto's protocol choice: native tool calls on small models.** Text was the weaker
+  protocol on both 4B models (Qwen3-4B 12 against 16 of 27, Qwen3.5-4B 26 against 42 of 54)
+  and level on 8B (36 against 37 of 54).
+  The 27B result doesn't carry over, so Auto keeps preferring native tool calls when the
+  template supports them.
+- **Plans:** with native tool calls the small models almost never call `update_plan` (0 to
+  1 of 27 runs). In text mode Qwen3-4B and Qwen3-8B send one in 16 to 18 of 27 (Qwen3.5-4B in 1 or 2), but it
+  stays at step 1 or 2 (`plan 1/3 → 1/3 → 1/3`), so the panel shows a stale plan.
+- **Loop guard:** blocked 5 to 11 repeats per text run on the 4B models and a few in the
+  app task. Not caught: a failing `edit_file` resent with small changes each time
+  (Qwen3-4B, 20 steps of "action 2 failed" on the Excel task). A guard on the same
+  error repeating would stop those runs about 15 steps earlier.
+- **Prompt size** (Qwen3-8B tokenizer): text prompt 2,907 tokens; native prompt 2,491 plus
+  1,150 for the ten tool schemas, 3,997 for the first request with the template. The
+  313-name package sentence is about 1,050 of that (a Qwen3.8 count from 2026-10-07). For
+  small models that sentence is the first thing to shorten.
+
 **Then the port:**
-- [ ] Code-as-action as the default for the in-browser engine: it needs no tool-call
-      template support, and it was the faster protocol even on the 27B model.
+- [ ] Native tool calls as the default for the in-browser engine where the model's template
+      supports them, code-as-action as the fallback (floor result above; the earlier plan
+      was code-as-action, from the 27B result).
 - [ ] Keep the prompt prefix byte-identical between steps (already true for the server's
       cache) so wllama can reuse its KV cache: prompt processing is its bottleneck
       (HermitUI measured ~40 s to the first token for Gemma-4 E2B on CPU).
