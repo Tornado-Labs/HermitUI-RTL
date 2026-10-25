@@ -415,6 +415,22 @@ The roadmap left five questions open; these are the answers the build took.
 - **Small models keeping a plan up to date** (question 5) is left to Phase 4. The
   success measurement records the plans sent (`plans`), so a stale plan can be spotted.
 
+## The loop guard (v0.3.14, 2026-10-24), decided while building it
+
+From comparing pi, opencode and Claude Code (opencode's `doom_loop`).
+- ⭐ **Skip the third, pause on the fourth.** The third identical action in a row isn't
+  run, and the model is told why; a fourth pauses the run for the user. Alternatives:
+  opencode asks the user at the third (a supervised agent already holds risky steps, and
+  a model often recovers from one nudge without anyone being disturbed), or only telling
+  the model (a model that ignores the note loops until the step limit).
+- ⭐ **Exact repeats only**: the same code (trimmed) or the same file actions with the same
+  arguments. A loop that changes one character each time isn't caught. Alternative: a
+  similarity threshold, which risks stopping legitimate reruns.
+- **Read-only actions count too.** Reading the same file three times in a row is the same
+  loop, even though it changes nothing.
+- **Anything between two steps resets the count**, including compaction, so a note from
+  the user always gives the agent a fresh start.
+
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 
 - ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a

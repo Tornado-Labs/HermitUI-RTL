@@ -295,6 +295,14 @@ plt.figure(); plt.plot([1, 1])
             calls(("update_plan", {"plan": [{"step": "Print one", "status": "in_progress"}, {"step": "Answer", "status": "pending"}]}), ("run_python", {"code": "print(1)"})),
             calls(("update_plan", {"plan": [{"step": "Print one", "status": "completed"}, {"step": "Answer", "status": "completed"}]}), ("finish", {"answer": "Done."})),
         ],
+        "E2E-REPEAT": [
+            *[py("print('same')") for _ in range(4)],
+            final("Done differently."),
+        ],
+        "E2E-NREPEAT": [
+            *[calls(("run_python", {"code": "print('same')"})) for _ in range(3)],
+            calls(("finish", {"answer": "Stopped repeating."})),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -1913,6 +1921,37 @@ def encoding_scenario(browser, port, state):
     page.context.close()
 
 
+def repeat_scenario(browser, port, state):
+    print("— the loop guard: a third identical action isn't run, a fourth pauses the run (text + native)")
+    page = open_app(browser)
+    configure(page, port, 10)
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-REPEAT: print it")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'paused'", 60, "paused by the loop guard")
+    steps = page.evaluate("() => S.timeline.filter(t => t.type === 'step').map(t => ({ n: t.n, status: t.status, kind: t.kind, ran: t.ranCode !== undefined }))")
+    check("the first two identical steps ran", [s["ran"] for s in steps[:2]] == [True, True], steps)
+    check("the third wasn't run, and says so", steps[2]["kind"] == "repeat" and not steps[2]["ran"], steps)
+    m = [r["messages"][-1]["content"] for r in state.requests[n0:]]
+    check("…the model is told why", "same code as your last 2 steps, so it was not run again" in m[3], m[3][-300:])
+    check("the fourth paused the run, with a note for the user", steps[3]["kind"] == "repeat" and "tried the same code 4 times in a row" in page.inner_text("#timeline"), steps)
+    check("the step card says it wasn't run", "not run again" in page.inner_text(".step-card >> nth=2"))
+    page.click("#continueBtn")
+    wait_until(page, "() => S.status === 'done'", 30, "continued to the end")
+    check("Continue resumes the run", page.evaluate("() => S.timeline.filter(t => t.type === 'step').pop().content") == "Done differently.")
+    page.context.close()
+
+    page = open_app(browser)
+    configure_at(page, f"http://127.0.0.1:{port}/tools/v1", 10)
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-NREPEAT: go")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "native repeat task done")
+    third = [m for m in state.requests[n0 + 3]["messages"] if m["role"] == "tool"][-1]["content"]
+    check("native: the third identical call gets the reason as its result", "so it was not run again" in third and "call ask_user" in third, third[-300:])
+    page.context.close()
+
+
 MD_REPORT = """# Report
 
 Some **bold** text.
@@ -2032,7 +2071,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

@@ -128,6 +128,11 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
   `validateSession` and the transcript; `planReminder` (from step 2 on, only without a
   plan, once, worded per protocol, the flag kept by an import).
 
+- **`guard.test.mjs`** covers the loop guard (DESIGN §5.8): `actionSignature` (code
+  trimmed, file actions without call ids, nothing for a reply that runs nothing),
+  `repeatsBefore` (a different action, a note or a compaction in between ends the
+  count), `repeatAdvice` in both protocols, and the limit.
+
 - **`filetools.test.mjs`** covers Phase 3.6 (DESIGN §5.1): the `search_files`,
   `delete_file` and `move_file` tags (quoted `>` in a pattern, a trailing `/`, the whole
   workspace as `.`), `globToRegExp` and `searchRegExp` (the `(?i)` prefix, plain text for
@@ -300,6 +305,10 @@ it stall, on cue; see its docstring):
     transcript lists it, and export → import brings it back. Natively, `update_plan` next
     to `run_python` gets its own result, skips nothing, and a plan sent with `finish`
     counts.
+24. **The loop guard** (`repeat`): the same code four times in a row runs twice; the third
+    isn't run and the model is told why; the fourth pauses the run with a note, and
+    Continue resumes it. Natively, the third identical `run_python` call gets the reason
+    as its result.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters

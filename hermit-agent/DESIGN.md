@@ -896,6 +896,26 @@ update_plan({"plan": [{"step": "Read data.csv", "status": "completed"}, …]})  
   shows a plan call taking shape; the transcript lists each plan. The user can't edit the
   plan: a note (guidance) changes the agent's course, and the agent updates the plan.
 
+### 5.8 The loop guard *(added in v0.3.14)*
+A model that is stuck tends to send the same action again, and each try costs a turn
+(after opencode's `doom_loop` permission, which asks when one tool call repeats three
+times with the same input). Small in-browser models (Phase 4) do it more.
+- **What counts:** a step's action as a string (`actionSignature`): its code (trimmed),
+  or its file actions with their arguments (native call ids don't count). Steps that run
+  nothing have none. `repeatsBefore` counts the steps right before this one with the same
+  action; anything else in the timeline in between (a note from the user, a compaction)
+  ends the count, so steering always resets it.
+- **The third identical action in a row isn't run** (`LIMITS.repeatLimit`, 3): the step
+  is kind and status `repeat`, and its observation (natively, each call's result) says it
+  wasn't run because it would give the same result, to read that result and try
+  something else, or to ask the user. Read-only file actions count too: reading the same
+  file a third time is the same loop.
+- **A fourth pauses the run** with a note for the user; a note steers it, and Continue
+  resumes. Nothing is asked before that: two identical steps in a row are often fine
+  (a rerun after a failed install, say).
+- The count isn't exported (`step.sig` is dropped on import), so an imported session
+  starts counting afresh.
+
 ---
 
 ## 6. Model guidance

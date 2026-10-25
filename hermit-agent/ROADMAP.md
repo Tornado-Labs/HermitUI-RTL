@@ -480,6 +480,30 @@ are in [REVIEW_NOTES.md](REVIEW_NOTES.md)):
 
 ---
 
+## After 3.7 — ideas from pi, opencode and Claude Code (2026-10-24)
+
+A second comparison, with pi (a minimal four-tool harness), opencode and Claude Code's
+public docs. Each is a small patch release of its own.
+- [x] **The loop guard** (opencode's `doom_loop`; DESIGN §5.8, v0.3.14): the third
+      identical action in a row isn't run, a fourth pauses the run.
+- [ ] **Compaction with a focus** (Claude Code's `/compact <focus>`): what the summary
+      should keep, typed when compacting by hand.
+- [ ] **A compaction thrash guard** (Claude Code stops auto-compacting when the context
+      refills right after each summary): pause instead of compacting every step.
+- [ ] **Rewind to the start gives the task back** (opencode's `/undo`): the task text goes
+      back into the composer, to be rephrased.
+- [ ] **Plan first** (opencode's Plan agent, Claude Code's plan mode): an autonomy level
+      where the agent may only read, search and send a plan until the user approves it.
+- **Not taken, for now:** branches instead of a cut on rewind (pi's session tree, Claude
+  Code's fork: a timeline and session-format change, worth it only if rewinding gets
+  used a lot); a smaller prompt for small models (pi keeps its prompt and tools under
+  1,000 tokens: measure in Phase 4 first); `apply_patch` (only if gpt-oss becomes the
+  Phase 4 model, since it is trained on that format); several questions in one
+  `ask_user` (opencode's `question`: little gain). pi argues against built-in to-do lists
+  ("more state the model must track"); the Phase 3.7 runs found a plan does no harm.
+
+---
+
 ## Later — more tool ideas (not planned yet)
 
 From the same comparison; none is scheduled.

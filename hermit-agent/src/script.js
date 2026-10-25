@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.13";
+const APP_VERSION = "0.3.14";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -59,7 +59,7 @@ const BUNDLED_LIBRARIES = {
 const SESSION_FORMAT = "hermit-agent-session";
 // 2: native tool calls (assistant tool_calls, "tool" messages; Phase 3). 1 still reads.
 const SESSION_FORMAT_VERSION = 2;
-const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2 };
+const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3 };
 const THROTTLE_MS = 80;
 
 // ========== 2. Helpers copied from HermitUI ==========
@@ -866,6 +866,33 @@ function planProgress(plan) {
 function planReminder(n, hasPlan, native, at, sent) {
     if (n < at || hasPlan || sent) return "";
     return `If this task takes more than a few more steps, send your plan now ${native ? "with update_plan (it can go along with your next call)" : "in an <update_plan> block (it can go along with your next code or file actions)"}, so the user can follow your progress. Skip it if you are nearly done.`;
+}
+
+// ---------- The loop guard (DESIGN §5.8) ----------
+// What a reply would run, as a string to compare steps by: its code, or its file actions
+// (tool and arguments, without call ids). "" for a reply that runs nothing.
+function actionSignature(parsed) {
+    if (!parsed) return "";
+    if (parsed.kind === "code" && typeof parsed.code === "string") return "code:" + parsed.code.trim();
+    if (parsed.kind === "files" && Array.isArray(parsed.actions)) return "files:" + JSON.stringify(parsed.actions.map(a => [a.tool, a.args]));
+    return "";
+}
+
+// How many steps right before this one ran (or tried to run) the same action. Anything
+// else in between, a note from the user, a compaction, ends the run of repeats.
+function repeatsBefore(timeline, sig) {
+    let n = 0;
+    for (let i = (timeline || []).length - 1; i >= 0; i--) {
+        const t = timeline[i];
+        if (!t || t.type !== "step" || t.sig !== sig) break;
+        n++;
+    }
+    return n;
+}
+
+// What the model is told when its action repeats the last `reps` steps and isn't run.
+function repeatAdvice(kind, reps, native) {
+    return `This is the same ${kind === "files" ? "set of file actions" : "code"} as your last ${reps} steps, so it was not run again: it would give the same result. Read that result, then try a different approach, or ${native ? "call ask_user" : "ask the user (ask:)"} if you are stuck.`;
 }
 
 // The plan the agent is following: the last one a step of the timeline set, as
@@ -4499,6 +4526,29 @@ async function agentTurn() {
         return "continue";
     }
 
+    // The loop guard (DESIGN §5.8): the third identical action in a row isn't run, and the
+    // model is told why; a fourth pauses the run for the user.
+    const sig = actionSignature(parsed);
+    if (sig) step.sig = sig;
+    const reps = sig ? repeatsBefore(S.timeline.slice(0, idx), sig) : 0;
+    if (reps >= LIMITS.repeatLimit - 1) {
+        const why = repeatAdvice(parsed.kind, reps, native);
+        debugLog("error", `the same action ${reps + 1}× in a row: not run`, why);
+        step.prose = parsed.prose || "";
+        step.kind = "repeat";
+        step.status = "repeat";
+        step.phase = "done";
+        step.endedAt = nowIso();
+        pushStepResult(buildObservation({ step: n, status: "error", notes: [why, ...planNotes] }),
+            new Map([...(parsed.skipped || []).map(([id, r]) => [id, buildObservation({ step: n, status: "error", notes: [r, why] })]), ...planResults]));
+        step.checkpoint = takeCheckpoint("step " + n);
+        renderTimelineItem(idx);
+        if (reps < LIMITS.repeatLimit) return "continue";
+        addNote(`🔁 The agent tried the same ${parsed.kind === "files" ? "file actions" : "code"} ${reps + 1} times in a row, so the run is paused. Send a note to steer it, then Continue.`, "warn");
+        setStatus("paused");
+        return "error";
+    }
+
     step.prose = parsed.prose;
     const notes = [...(parsed.notes || []), ...planNotes];
     const remind = planReminder(n, !!currentPlan(S.timeline), native, LIMITS.planReminderStep, S.timeline.some(t => t.type === "step" && t.planReminded));
@@ -5054,7 +5104,7 @@ function button(label, action, idx, cls, title) {
 }
 
 const VERDICT_LABELS = { auto: "✅ auto-committed", approved: "👍 approved", edited: "✏️ edited & approved", rejected: "↩️ rejected", "rolled back": "↩️ rolled back", "approved (network)": "🌐 approved with network" };
-const STATUS_LABELS = { unverified: "⚠️ files missing", ok: "ok", error: "error", timeout: "⏱ timeout", killed: "☠️ killed", crashed: "💥 crashed", rejected: "rejected", cutoff: "✂️ cut off", empty: "empty reply", broken: "unclosed code", mixed: "mixed reply", toolcall: "tool call", fakeobs: "no action", interrupted: "interrupted", textaction: "no tool call", badcall: "bad tool call", plan: "📋 plan only" };
+const STATUS_LABELS = { unverified: "⚠️ files missing", ok: "ok", error: "error", timeout: "⏱ timeout", killed: "☠️ killed", crashed: "💥 crashed", rejected: "rejected", cutoff: "✂️ cut off", empty: "empty reply", broken: "unclosed code", mixed: "mixed reply", toolcall: "tool call", fakeobs: "no action", interrupted: "interrupted", textaction: "no tool call", badcall: "bad tool call", plan: "📋 plan only", repeat: "🔁 repeated" };
 
 function renderThink(item, card, streaming) {
     if (!item.reasoning) return;
@@ -5389,7 +5439,7 @@ function buildStepCard(item, idx, old) {
             card.appendChild(d);
         }
     } else if (item.kind !== "code" && item.status) {
-        card.appendChild(el("p", "hint", { cutoff: "✂️ The reply was cut off before it finished — nothing ran.", empty: "The reply was empty — nothing ran.", broken: "The reply had an unclosed code block or file tag — nothing ran.", mixed: "The reply mixed file actions with a code block — nothing ran.", toolcall: "The reply used a tool-call tag, which isn't how actions work here — nothing ran.", fakeobs: "The reply wrote its own <observation> instead of acting — nothing ran.", textaction: "The reply put code or file actions in its text instead of calling a tool — nothing ran.", badcall: "None of the reply's tool calls could run — nothing ran.", plan: "📋 The reply only updated the plan — nothing else ran." }[item.status] || ""));
+        card.appendChild(el("p", "hint", { cutoff: "✂️ The reply was cut off before it finished — nothing ran.", empty: "The reply was empty — nothing ran.", broken: "The reply had an unclosed code block or file tag — nothing ran.", mixed: "The reply mixed file actions with a code block — nothing ran.", toolcall: "The reply used a tool-call tag, which isn't how actions work here — nothing ran.", fakeobs: "The reply wrote its own <observation> instead of acting — nothing ran.", textaction: "The reply put code or file actions in its text instead of calling a tool — nothing ran.", badcall: "None of the reply's tool calls could run — nothing ran.", plan: "📋 The reply only updated the plan — nothing else ran.", repeat: "🔁 The same action as the steps before it — not run again." }[item.status] || ""));
     }
     if ((item.skippedCalls || []).length) {
         const ul = el("ul", "step-notes skipped-calls");
