@@ -674,8 +674,11 @@ def run_task(page, task, deadline_s, tool_mode="auto"):
     steps = ev(page, "() => S.stepCount")
     tokens = ev(page, "() => S.tokens")
     protocols = ev(page, "() => S.timeline.filter(t => t.type === 'step').map(t => t.protocol || 'text')")
+    # Phase 3.7: each plan the agent sent, as "done/steps" (recorded, never required).
+    plans = ev(page, "() => S.timeline.filter(t => t.type === 'step' && (t.plan || []).length).map(t => t.plan.filter(p => p.status === 'completed').length + '/' + t.plan.length)")
     base = {"name": task["name"], "steps": steps, "secs": round(elapsed), "tokens": tokens, "approvals": approvals, "answer": answer[-400:],
-            "protocols": {p: protocols.count(p) for p in set(protocols)}}
+            "protocols": {p: protocols.count(p) for p in set(protocols)}, "plans": plans,
+            "compactions": ev(page, "() => S.timeline.filter(t => t.type === 'compaction').length")}
     if status != "done":
         return {**base, "passed": False, "detail": f"ended in state {status}" + ("" if time.time() - t0 < deadline_s else " (deadline)")}
     problems = []
@@ -736,6 +739,7 @@ def main(all_tasks=None, quick=None, label="success"):
     ap.add_argument("--only", default="", help="comma-separated substrings of task names")
     ap.add_argument("--quick", action="store_true", help="only the QUICK tasks: the check after a small change")
     ap.add_argument("--app", default=str(APP_PATH), help="the built HTML file to test")
+    ap.add_argument("--context-size", type=int, default=0, help="Settings → Context size (0: the server's); small values force compaction mid-task")
     ap.add_argument("--out", default="", help="results JSON (default: tests/results/success-<time>.json)")
     args = ap.parse_args()
     tasks = [t for t in all_tasks if (t["name"] in quick if args.quick else not args.only or any(o.strip() and o.strip() in t["name"] for o in args.only.split(",")))]
@@ -754,6 +758,8 @@ def main(all_tasks=None, quick=None, label="success"):
         page.fill("#settingUrl", args.base_url)
         page.fill("#settingModelInput", args.model)
         page.select_option("#settingToolMode", args.tool_mode)
+        if args.context_size:
+            page.fill("#settingContextSize", str(args.context_size))
         page.click("#settingSave")
         page.select_option("#effortSelect", args.effort)
         page.select_option("#autonomySelect", "risk")
@@ -765,6 +771,10 @@ def main(all_tasks=None, quick=None, label="success"):
                 lib = "" if "library_used" not in r else (" · library used" if r["library_used"] else " · built WITHOUT the library")
                 if "tools_used" in r:
                     lib += f" · file tools used: {', '.join(r['tools_used']) or 'none of ' + ', '.join(task['tools'])}"
+                if r.get("plans"):
+                    lib += f" · plan {' → '.join(r['plans'])}"
+                if r.get("compactions"):
+                    lib += f" · compacted ×{r['compactions']}"
                 print(f"  {'✅' if r['passed'] else '❌'} {task['name']}: {r['steps']} steps, {r['secs']} s{lib} {r.get('detail', '')}")
                 results.append(r)
                 out.write_text(json.dumps({"base_url": args.base_url, "model": args.model, "effort": args.effort, "tool_mode": args.tool_mode, "results": results}, indent=1))
@@ -774,6 +784,9 @@ def main(all_tasks=None, quick=None, label="success"):
     for task in tasks:
         rs = [r for r in results if r["name"] == task["name"]]
         print(f"{task['name']:34} {sum(r['passed'] for r in rs)}/{len(rs)}" + "".join(f"  ❌ run {r['run']}: {r['detail'][:120]}" for r in rs if not r["passed"]))
+    long = [r for r in results if r["steps"] > 4]
+    print(f"\nplans: sent in {sum(bool(r.get('plans')) for r in results)}/{len(results)} runs; "
+          f"in {sum(bool(r.get('plans')) for r in long)}/{len(long)} runs of more than 4 steps")
     print(f"\nPASS RATE: {passed}/{len(results)} = {100 * passed / max(1, len(results)):.0f} % "
           f"({len(tasks)} tasks × {args.runs} run{'s' if args.runs != 1 else ''}, {round((time.time() - started) / 60)} min) → {out}")
     sys.exit(0 if results and passed == len(results) else 1)

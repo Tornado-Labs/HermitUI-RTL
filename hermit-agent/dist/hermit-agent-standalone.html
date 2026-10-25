@@ -1934,6 +1934,44 @@ button, select, input, textarea { font: inherit; color: inherit; }
     gap: 10px;
     padding: 2px 4px 2px 0;
 }
+/* The agent's plan (DESIGN §5.7): pinned above the timeline, collapsible. */
+.plan-panel {
+    flex: 0 0 auto;
+    max-height: 38vh;
+    overflow-y: auto;
+    padding: 10px 14px;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.plan-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.88rem;
+}
+.plan-title { font-weight: 700; }
+.plan-progress { color: var(--text-muted); font-size: 0.82rem; }
+.plan-now { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 0.82rem; }
+.plan-now::before { content: "▶ "; color: var(--accent); }
+.plan-panel[open] .plan-now { display: none; }
+.plan-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 0.86rem; }
+.plan-item { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.plan-mark { flex: 0 0 1.1em; text-align: center; color: var(--text-muted); }
+.plan-step { min-width: 0; overflow-wrap: anywhere; }
+.plan-item.is-completed .plan-mark { color: var(--ok); }
+.plan-item.is-completed .plan-step { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.plan-item.is-in-progress .plan-mark { color: var(--accent); }
+.plan-item.is-in-progress .plan-step { font-weight: 600; }
+.plan-from { margin-top: 6px; font-size: 0.78rem; }
+.plan-update .plan-list { margin-top: 6px; }
+
 .empty-state {
     margin: auto;
     max-width: 560px;
@@ -2410,7 +2448,7 @@ pre.live-output { border-color: var(--primary); }
     </div>
     <header class="app-header">
         <div class="brand">
-            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.12</span></h1>
+            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.13</span></h1>
             <span class="model-badge" id="modelBadge">🤖 model</span>
             <span class="local-badge" id="localBadge" hidden>🏠 local</span>
             <span class="protocol-badge" id="protocolBadge">🔧 auto</span>
@@ -2439,6 +2477,7 @@ pre.live-output { border-color: var(--primary); }
 
     <main class="layout">
         <section class="timeline-pane">
+            <details class="plan-panel" id="planPanel" open hidden></details>
             <div class="timeline" id="timeline" aria-live="polite"></div>
             <form class="composer" id="composer">
                 <div class="input-shell">
@@ -3199,7 +3238,7 @@ def hermit_clear_workspace():
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.12";
+const APP_VERSION = "0.3.13";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -3245,7 +3284,7 @@ const BUNDLED_LIBRARIES = {
 const SESSION_FORMAT = "hermit-agent-session";
 // 2: native tool calls (assistant tool_calls, "tool" messages; Phase 3). 1 still reads.
 const SESSION_FORMAT_VERSION = 2;
-const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200 };
+const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2 };
 const THROTTLE_MS = 80;
 
 // ========== 2. Helpers copied from HermitUI ==========
@@ -3551,6 +3590,7 @@ Every reply must be exactly ONE of:
 2. Short reasoning, then one or more file actions (see below). They are applied in order and you get the results back in an <observation> message. Never put file actions and a \`\`\`python block in the same reply.
 3. The final answer for the user, with NO python code block and no file actions, once the task is complete. Mention the files you created.
 4. A line starting with "ask:" followed by your question, if you cannot continue without information from the user. To offer choices, put each one on its own line after the question, starting with "- " (at most 6); the user can still answer in their own words.
+Any of these may also carry your plan (see <update_plan> below).
 
 File actions read, search and change files in /workspace directly. Prefer them over Python for finding text, and for reading, creating and editing source code, documents and other text files. Use Python to run code, process data and handle binary files. Start each tag on its own line:
 <read_file path="notes.txt"/>
@@ -3576,6 +3616,14 @@ the replacement text
   Moves or renames a file or a folder, binary files too. Nothing may exist at new_path yet: to replace a file, delete it first, in the same reply.
 Paths are relative to /workspace. If any write, edit, delete or move in a reply fails, none of that reply's changes are applied. A .py file you write or edit is checked for syntax errors, and you are told if it doesn't compile.
 
+Your plan, which the user sees above your steps:
+<update_plan>
+- [x] a step that is done
+- [>] the step you are on now
+- [ ] a step still to do
+</update_plan>
+  For a task of more than three or four steps, send it at the start, and again (the whole list, updated) whenever a step is done or the plan changes; at most 12 steps, one line each. It goes along with the rest of a reply (code, file actions, the final answer) and runs nothing by itself. Skip it for short tasks.
+
 Rules:
 - Inspect files before you modify them.
 - Print short summaries, not whole files or huge data.
@@ -3591,8 +3639,9 @@ The tools (you get each call's result back in an <observation>):
 - read_file, search_files, write_file, edit_file, delete_file, move_file: read, search and change files in /workspace directly. Prefer them over Python for finding text, and for reading, creating and editing source code, documents and other text files. Use Python to run code, process data and handle binary files. read_file shows at most 400 lines at a time: ask for more with start_line. Each old_text of edit_file must match the file exactly, indentation included, and occur exactly once. A .py file you write or edit is checked for syntax errors, and you are told if it doesn't compile.
 - finish: ends the task with your final answer for the user, once the task is complete. Mention the files you created. Answers to questions go here too, code examples included.
 - ask_user: asks the user a question, if you cannot continue without information from them. Offer options when the answer is one of a few choices.
+- update_plan: keeps your plan, which the user sees above your steps. For a task of more than three or four steps, send it at the start, and again (the whole list, updated) whenever a step is done or the plan changes. Skip it for short tasks.
 
-Each reply is ONE step: one run_python call, OR one or more file tool calls (applied in order; if any write, edit, delete or move fails, none of that reply's changes are applied), OR finish, OR ask_user. Don't combine run_python with other tools in one reply: only the first action runs.
+Each reply is ONE step: one run_python call, OR one or more file tool calls (applied in order; if any write, edit, delete or move fails, none of that reply's changes are applied), OR finish, OR ask_user. Don't combine run_python with other tools in one reply: only the first action runs. An update_plan call can go along with any of them.
 
 Rules:
 - Inspect files before you modify them.
@@ -3656,11 +3705,21 @@ function splitReply(raw, isFinal) {
 // Next to file actions such a tag runs nothing either: the actions apply, and strayTag
 // names it so the step can say so. File actions and a python block in one reply are
 // "mixed": nothing runs.
-// Returns { kind: code|files|mixed|ask|final|broken|cutoff|empty|toolcall|fakeobs, ... }.
+// An <update_plan> block goes along with any of these (plan, planError, planWarning);
+// alone, or with prose while steps are still open, it is kind "plan".
+// Returns { kind: code|files|mixed|ask|final|plan|broken|cutoff|empty|toolcall|fakeobs, ... }.
 function parseReply(text, finishReason) {
     // File-action tags come out first, so fences inside a file's content aren't code.
     const fa = extractFileActions(text);
-    const t = fa.rest;
+    // The plan rides along with any kind of reply (DESIGN §5.7).
+    const pl = extractPlan(fa.rest);
+    const t = pl.rest;
+    const parsed = parseReplyText(t, fa, pl, finishReason);
+    return pl.found ? { ...parsed, plan: pl.plan, planError: pl.error, planWarning: pl.warning } : parsed;
+}
+
+function parseReplyText(t, fa, pl, finishReason) {
+    if (pl.unclosed) return { kind: finishReason === "length" ? "cutoff" : "broken", prose: t.trim(), unclosed: "update_plan" };
     if (fa.unclosed) return { kind: finishReason === "length" ? "cutoff" : "broken", prose: t.trim(), unclosed: fa.unclosed };
     const fences = [...t.matchAll(/```(?:python3?|py)[ \t]*\r?\n([\s\S]*?)```/g)];
     const tags = [...t.matchAll(/^[ \t]*<python>[ \t]*(?:\r?\n)?([\s\S]*?)<\/python>/gm)];
@@ -3691,6 +3750,9 @@ function parseReply(text, finishReason) {
     if (/^[ \t]*<\/?observation\b/im.test(t)) return { kind: "fakeobs", prose: t.trim() };
     const ask = t.match(/^[ \t]*\**ask:\**[ \t]*([\s\S]+)/im);
     if (ask) return { kind: "ask", ...splitAskOptions(ask[1]), prose: t.slice(0, ask.index).trim() };
+    // Only a plan, with or without prose: a step that runs nothing else. Text next to a
+    // plan whose steps are all done is the final answer.
+    if (pl.found && (!t.trim() || !pl.plan || pl.plan.some(p => p.status !== "completed"))) return { kind: "plan", prose: t.trim() };
     if (!t.trim()) return { kind: "empty", prose: "" };
     return { kind: "final", answer: t.trim() };
 }
@@ -3798,7 +3860,7 @@ function copyMessage(m) {
 // The tools offered when the endpoint supports OpenAI `tools`. The file tools take the
 // argument shapes applyFileActions consumes; run_python, ask_user and finish are the
 // code block, the ask: line and the final answer of code-as-action.
-const AGENT_TOOL_NAMES = ["run_python", "read_file", "search_files", "write_file", "edit_file", "delete_file", "move_file", "ask_user", "finish"];
+const AGENT_TOOL_NAMES = ["run_python", "read_file", "search_files", "write_file", "edit_file", "delete_file", "move_file", "update_plan", "ask_user", "finish"];
 function agentToolDefs() {
     const fn = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
     const path = { type: "string", description: "Path relative to /workspace, e.g. \"data/report.md\"" };
@@ -3819,6 +3881,8 @@ function agentToolDefs() {
         fn("delete_file", "Delete a file, or a folder with everything in it.", { path }, ["path"]),
         fn("move_file", "Move or rename a file or a folder (binary files too). Nothing may exist at new_path yet: to replace a file, delete it first, in the same reply.",
             { path, new_path: { type: "string", description: "The new path, relative to /workspace" } }, ["path", "new_path"]),
+        fn("update_plan", "Keep a short plan of the task, which the user sees above the steps. Send the whole list each time, with each step's status: at the start of a task of more than three or four steps, and again when a step is done or the plan changes. It can go along with any other call in the same reply and runs nothing by itself.",
+            { plan: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", properties: { step: { type: "string", description: "One short line" }, status: { type: "string", enum: ["pending", "in_progress", "completed"] } }, required: ["step", "status"] } } }, ["plan"]),
         fn("ask_user", "Ask the user a question when you cannot continue without their input. The task pauses until they answer.",
             { question: { type: "string" }, options: { type: "array", maxItems: 6, items: { type: "string" }, description: "Optional: up to 6 short answers the user can pick with one click; they can still answer in their own words" } }, ["question"]),
         fn("finish", "End the task with your final answer for the user, once the task is complete. Mention the files you created.",
@@ -3964,10 +4028,87 @@ function splitAskOptions(text) {
     return options.length && question ? { question, options } : { question: String(text || "").trim(), options: [] };
 }
 
+// ---------- The plan (DESIGN §5.7) ----------
+// A plan as the model sent it → { plan: [{ step, status }] } with at most planMaxItems
+// steps, each one line of text, status "pending" | "in_progress" | "completed" (common
+// synonyms mapped, anything else pending); a warning when steps were dropped. { error }
+// when no step is left.
+function cleanPlan(raw) {
+    const error = 'update_plan needs plan: a list of {"step": "…", "status": "pending" | "in_progress" | "completed"}.';
+    if (!Array.isArray(raw)) return { error };
+    const plan = [];
+    for (const it of raw) {
+        const o = typeof it === "string" ? { step: it } : it && typeof it === "object" ? it : null;
+        const step = o && (typeof o.step === "string" || typeof o.step === "number") ? String(o.step).replace(/\s+/g, " ").trim().slice(0, LIMITS.planMaxStepChars) : "";
+        if (!step) continue;
+        const st = String(o.status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+        const status = /^(completed?|done|finished)$/.test(st) ? "completed" : /^(in_progress|active|doing|current|started|running|now)$/.test(st) ? "in_progress" : "pending";
+        plan.push({ step, status });
+    }
+    if (!plan.length) return { error };
+    if (plan.length > LIMITS.planMaxItems) return { plan: plan.slice(0, LIMITS.planMaxItems), warning: `Only the first ${LIMITS.planMaxItems} steps of your plan were kept: keep it shorter.` };
+    return { plan };
+}
+
+// The checklist inside <update_plan>: "- [x] done", "- [>] the step you are on" ([~], [-],
+// [*] and [/] too), "- [ ] still to do"; a bullet without a box is still to do.
+function parsePlanText(body) {
+    const items = [];
+    for (const line of String(body || "").split(/\r?\n/)) {
+        const box = line.match(/^[ \t]*(?:[-*•+]|\d{1,2}[.)])?[ \t]*\[([ xX>~*\/-]?)\][ \t]*(\S.*)$/);
+        if (box) { items.push({ step: box[2], status: /x/i.test(box[1]) ? "completed" : box[1].trim() ? "in_progress" : "pending" }); continue; }
+        const bullet = line.match(/^[ \t]*(?:[-*•+]|\d{1,2}[.)])[ \t]+(\S.*)$/);
+        if (bullet) items.push({ step: bullet[1], status: "pending" });
+    }
+    const r = cleanPlan(items);
+    return r.error ? { error: '<update_plan> had no steps: put each on its own line, as "- [ ] step" ([x] when done, [>] for the step you are on).' } : r;
+}
+
+// The <update_plan> blocks of a code-as-action reply, each starting a line; the last one
+// counts. Returns { rest: the text without them, found, plan?, error?, warning?, unclosed }.
+function extractPlan(text) {
+    let last = null;
+    const rest = String(text || "").replace(/^[ \t]*<update_plan>[ \t]*(?:\r?\n)?([\s\S]*?)<\/update_plan>[ \t]*(?:\r?\n)?/gm, (m, body) => { last = body; return ""; });
+    const unclosed = /^[ \t]*<update_plan>/m.test(rest);
+    return last === null ? { rest, found: false, unclosed } : { rest, found: true, unclosed, ...parsePlanText(last) };
+}
+
+// A plan as the code-as-action checklist; also how the model sees it after a compaction.
+function formatPlan(plan) {
+    return (plan || []).map(p => `- [${p.status === "completed" ? "x" : p.status === "in_progress" ? ">" : " "}] ${p.step}`).join("\n");
+}
+
+// "2 of 5 done".
+function planProgress(plan) {
+    return `${(plan || []).filter(p => p.status === "completed").length} of ${(plan || []).length} done`;
+}
+
+// The one reminder about the plan (DESIGN §5.7): if no step has sent a plan by step `at`
+// (2), the observation of the first step from then on that runs something asks for one,
+// once (sent: an earlier step carried it). Without it Qwen3.8 kept a plan in 65 % of
+// longer runs with code-as-action but never with native tool calls: it reads the files
+// first, then never comes back to it. Returns the note, or "".
+function planReminder(n, hasPlan, native, at, sent) {
+    if (n < at || hasPlan || sent) return "";
+    return `If this task takes more than a few more steps, send your plan now ${native ? "with update_plan (it can go along with your next call)" : "in an <update_plan> block (it can go along with your next code or file actions)"}, so the user can follow your progress. Skip it if you are nearly done.`;
+}
+
+// The plan the agent is following: the last one a step of the timeline set, as
+// { plan, n } (n: that step), or null. Derived, so rewind and import need nothing extra.
+function currentPlan(timeline) {
+    for (let i = (timeline || []).length - 1; i >= 0; i--) {
+        const t = timeline[i];
+        if (t && t.type === "step" && Array.isArray(t.plan) && t.plan.length) return { plan: t.plan, n: t.n };
+    }
+    return null;
+}
+
 // DESIGN §5.6: what one native reply does. calls: [{ id, name, arguments }] as streamed
 // (arguments a JSON string, or an object from servers that send one). The first action
 // call decides: a run_python runs alone; a file tool runs together with the file calls
 // right after it, as one batch. finish and ask_user count only without action calls.
+// update_plan goes along with any of them (plan, planError, planWarning, planResults:
+// [[id, result]]); alone it is kind "plan".
 // Every call that doesn't run gets a reason. A reply without calls is read like a
 // code-as-action reply, except that a fence or a file tag in it runs nothing: plain text
 // is the final answer. Returns { kind, prose, code?, actions? (with .id), answer?,
@@ -4007,24 +4148,38 @@ function parseToolCalls(calls, text, finishReason, step) {
         if (["code", "files", "mixed", "broken", "toolcall"].includes(p.kind)) return { ...out, kind: "textaction", tag: p.kind === "toolcall" ? p.tag : "", what: p.kind === "files" ? "files" : p.kind === "toolcall" ? "toolcall" : "code" };
         return { ...p, prose: p.prose !== undefined ? p.prose : prose, stored: [], skipped: [], notes: [] };
     }
+    // update_plan rides along with any reply (DESIGN §5.7): the last call counts, and the
+    // other calls are decided as if it weren't there. Each gets its own result.
+    const planCalls = ok.filter(c => c.name === "update_plan");
+    out.planResults = [];
+    planCalls.forEach((c, i) => {
+        if (i < planCalls.length - 1) { out.planResults.push([c.id, "Not used: a later update_plan call in this reply replaced it."]); return; }
+        const p = cleanPlan(c.args.plan);
+        if (p.plan) { out.plan = p.plan; if (p.warning) out.planWarning = p.warning; }
+        else out.planError = p.error;
+        out.planResults.push([c.id, p.plan ? `Plan updated (${planProgress(p.plan)}).${p.warning ? " " + p.warning : ""}` : `ERROR: ${p.error} The plan was not changed.`]);
+    });
+    const acts = ok.filter(c => c.name !== "update_plan");
     const isAction = (c) => c.name === "run_python" || FILE_TOOLS.includes(c.name);
     const known = (c) => AGENT_TOOL_NAMES.includes(c.name);
     const unknownReason = (c) => `There is no tool ${JSON.stringify(c.name)}. The tools are ${AGENT_TOOL_NAMES.join(", ")}` + (/bash|shell|terminal|exec|command/i.test(c.name) ? " (no shell: run Python, e.g. runpy.run_path(\"script.py\", run_name=\"__main__\"))." : /grep|glob|find|search|list|ls$/i.test(c.name) ? " (to find files or text in them, use search_files)." : ".");
-    const first = ok.findIndex(c => known(c) && isAction(c));
+    const first = acts.findIndex(c => known(c) && isAction(c));
     if (first < 0) {
-        const end = ok.find(c => c.name === "finish" || c.name === "ask_user");
+        const end = acts.find(c => c.name === "finish" || c.name === "ask_user");
         const field = end && (end.name === "finish" ? "answer" : "question");
         const value = end && typeof end.args[field] === "string" ? end.args[field].trim() : "";
         if (end && (value || (end.name === "finish" && prose))) {
             // Ending the run: only the call that ends it stays in the history, answered when
-            // the user replies (appendToLastUserMessage).
+            // the user replies (appendToLastUserMessage). A plan sent with it still counts.
             out.stored = [{ id: end.id, name: end.name, arguments: end.json }];
             if (end.name === "finish") return { ...out, kind: "final", answer: value };
             return { ...out, kind: "ask", question: value, options: cleanAskOptions(end.args.options) };
         }
-        out.kind = "badcall";
         out.stored = ok.map(c => ({ id: c.id, name: c.name, arguments: c.json }));
-        for (const c of ok) {
+        // Only the plan: a step that runs nothing else.
+        if (!acts.length && planCalls.length) return { ...out, kind: "plan" };
+        out.kind = "badcall";
+        for (const c of acts) {
             out.skipped.push([c.id, !known(c) ? unknownReason(c)
                 : `${c.name} needs ${c.name === "finish" ? "an answer" : "a question"}: {"${c.name === "finish" ? "answer" : "question"}": "…"}.`]);
         }
@@ -4032,17 +4187,17 @@ function parseToolCalls(calls, text, finishReason, step) {
         return out;
     }
     out.stored = ok.map(c => ({ id: c.id, name: c.name, arguments: c.json }));
-    const lead = ok[first];
+    const lead = acts[first];
     if (lead.name === "run_python" && !(typeof lead.args.code === "string" && lead.args.code.trim())) {
-        for (const c of ok) out.skipped.push([c.id, c === lead ? "Not run: run_python needs code: {\"code\": \"print(1)\"}." : "Not run: the run_python call before it had no code, so nothing in this reply ran."]);
+        for (const c of acts) out.skipped.push([c.id, c === lead ? "Not run: run_python needs code: {\"code\": \"print(1)\"}." : "Not run: the run_python call before it had no code, so nothing in this reply ran."]);
         return { ...out, kind: "badcall" };
     }
     let ran = [lead];
     if (lead.name !== "run_python") {
-        for (let i = first + 1; i < ok.length && FILE_TOOLS.includes(ok[i].name); i++) ran.push(ok[i]);
+        for (let i = first + 1; i < acts.length && FILE_TOOLS.includes(acts[i].name); i++) ran.push(acts[i]);
     }
     const ranIds = new Set(ran.map(c => c.id));
-    for (const c of ok) {
+    for (const c of acts) {
         if (ranIds.has(c.id)) continue;
         let why;
         if (!known(c)) why = unknownReason(c);
@@ -4080,6 +4235,7 @@ function toolCallAsText(call) {
         }
         case "delete_file": return `<delete_file path=${attr(a.path)}/>`;
         case "move_file": return `<move_file path=${attr(a.path)} new_path=${attr(a.new_path)}/>`;
+        case "update_plan": return `<update_plan>\n${formatPlan(cleanPlan(a.plan).plan)}\n</update_plan>`;
         case "finish": return s(a.answer);
         case "ask_user": return "ask: " + s(a.question) + cleanAskOptions(a.options).map(o => "\n- " + o).join("");
         default: return `[call to ${String(f.name || "?")}: ${String(f.arguments || "").slice(0, 2000)}]`;
@@ -4219,6 +4375,9 @@ function noActionAdvice(parsed, native, ctxCut) {
             ? `Your reply contained a tool call written as text (<${parsed.tag || "tool_call"}>) that wasn't received as a tool call, so nothing ran. Make the call again through the tools interface.`
             : `Your reply had ${parsed.what === "files" ? "file-action tags" : "a ```python block"} in its text, but here code and file changes only run as tool calls, so nothing ran. Call ${parsed.what === "files" ? "the file tools (read_file, search_files, write_file, edit_file, delete_file, move_file)" : "run_python"} instead, or call finish if that was your final answer.`;
         case "badcall": return "None of your tool calls could run; each one's result says why.";
+        case "plan": return native
+            ? "Nothing but the plan ran. Go on with its next step in your next reply (update_plan can go along with that call), or call finish if the task is done."
+            : "Nothing but the plan ran. Go on with its next step in your next reply (a ```python block or file actions; the plan can go along with them), or give the final answer if the task is done.";
         default: return "Nothing ran.";
     }
 }
@@ -4324,9 +4483,11 @@ If the history starts with an earlier summary, fold it in. Write only the summar
 }
 
 // The compacted history: system prompt, task message plus the summary of steps
-// 1..toStep and the current file list, then the kept tail.
-function buildCompactedMessages(messages, cut, summary, toStep, files) {
-    const block = `<history_summary steps="1-${toStep}">\nSteps 1–${toStep} were summarised to save context. The interpreter and /workspace are unaffected.\n\n${String(summary).trim()}\n</history_summary>\n\nFiles in /workspace now: ${formatFileList(files)}`;
+// 1..toStep, the current file list and the agent's plan (currentPlan, DESIGN §5.7), then
+// the kept tail.
+function buildCompactedMessages(messages, cut, summary, toStep, files, plan) {
+    const kept = plan && plan.plan && plan.plan.length ? `\n\nYour plan, as your last update_plan (step ${plan.n}) left it:\n${formatPlan(plan.plan)}` : "";
+    const block = `<history_summary steps="1-${toStep}">\nSteps 1–${toStep} were summarised to save context. The interpreter and /workspace are unaffected.\n\n${String(summary).trim()}\n</history_summary>\n\nFiles in /workspace now: ${formatFileList(files)}${kept}`;
     return [
         { role: messages[0].role, content: messages[0].content },
         { role: "user", content: taskMessageBase(messages[1].content) + "\n\n" + block },
@@ -5940,6 +6101,7 @@ function transcriptMarkdown(session) {
                 for (const line of item.skippedCalls || []) md.push(`- Tool call not run: ${line}`);
                 if ((item.skippedCalls || []).length) md.push(``);
             }
+            if ((item.plan || []).length) md.push(`Updated the plan (${planProgress(item.plan)}):`, ``, formatPlan(item.plan), ``);
         }
     }
     return md.join("\n");
@@ -6060,6 +6222,10 @@ function validateSession(raw) {
                 s.notes = strArr(it.notes);
                 s.netAttempts = strArr(it.netAttempts);
                 s.skippedCalls = strArr(it.skippedCalls);
+                const plan = Array.isArray(it.plan) ? cleanPlan(it.plan).plan : null;
+                if (plan) s.plan = plan;
+                if (typeof it.planError === "string" && it.planError) s.planError = it.planError;
+                if (it.planReminded === true) s.planReminded = true;
                 const options = cleanAskOptions(it.options);
                 if (options.length) s.options = options;
                 s.blockCount = num(it.blockCount, 0);
@@ -7471,6 +7637,12 @@ async function agentTurn() {
     // code-as-action reads the text. Both give the same kinds (DESIGN §5.6).
     const parsed = native ? parseToolCalls(result.toolCalls, split.text, result.finishReason, n) : parseReply(split.text, result.finishReason);
     step.kind = parsed.kind;
+    // DESIGN §5.7: the plan this reply sent. Native calls get their own results; in
+    // code-as-action a plan that couldn't be read is a note.
+    if (parsed.plan) { step.plan = parsed.plan; renderPlanPanel(); }
+    if (parsed.planError) step.planError = parsed.planError;
+    const planNotes = native ? [] : parsed.planError ? [parsed.planError + " The plan was not changed."] : parsed.planWarning ? [parsed.planWarning] : [];
+    const planResults = parsed.planResults || [];
     const ctxCut = cutByContext(result.finishReason, result.usage, SETTINGS.maxTokens, REASONING.nCtx);
     if (ctxCut) {
         RUN.compactNext = true;
@@ -7542,9 +7714,10 @@ async function agentTurn() {
         step.status = parsed.kind;
         step.phase = "done";
         step.endedAt = nowIso();
-        const whyNotes = [...(parsed.kind === "badcall" ? [] : [why]), ...(parsed.notes || [])];
-        pushStepResult(buildObservation({ step: n, status: "error", notes: whyNotes }),
-            new Map((parsed.skipped || []).map(([id, r]) => [id, buildObservation({ step: n, status: "error", notes: [r, ...whyNotes] })])));
+        const whyNotes = [...(parsed.kind === "badcall" ? [] : [why]), ...(parsed.notes || []), ...planNotes];
+        const status = parsed.kind === "plan" && !parsed.planError ? "ok" : "error";
+        pushStepResult(buildObservation({ step: n, status, notes: whyNotes }),
+            new Map([...(parsed.skipped || []).map(([id, r]) => [id, buildObservation({ step: n, status: "error", notes: [r, ...whyNotes] })]), ...planResults]));
         sendFileListingIfDue(step);
         step.checkpoint = takeCheckpoint("step " + n);
         renderTimelineItem(idx);
@@ -7552,7 +7725,9 @@ async function agentTurn() {
     }
 
     step.prose = parsed.prose;
-    const notes = [...(parsed.notes || [])];
+    const notes = [...(parsed.notes || []), ...planNotes];
+    const remind = planReminder(n, !!currentPlan(S.timeline), native, LIMITS.planReminderStep, S.timeline.some(t => t.type === "step" && t.planReminded));
+    if (remind) { notes.push(remind); step.planReminded = true; debugLog("tool", "plan reminder sent with step " + n); }
     let outcome;
     if (parsed.kind === "files") {
         if (result.finishReason === "length") notes.push(`Your reply was cut off at ${ctxCut ? "the end of the context window" : "the token limit"} after these file actions; anything after them was lost.`);
@@ -7570,6 +7745,7 @@ async function agentTurn() {
     // Calls that didn't run get their reason; a file batch gets one result per call.
     const perCall = new Map((parsed.skipped || []).map(([id, why]) => [id, buildObservation({ step: n, status: "error", notes: [why] })]));
     for (const [id, obs] of outcome.perCall || []) perCall.set(id, obs);
+    for (const [id, r] of planResults) perCall.set(id, r);
     pushStepResult(outcome.observation, perCall);
     sendFileListingIfDue(step);
     step.checkpoint = takeCheckpoint("step " + n);
@@ -7662,7 +7838,7 @@ async function compactHistory(reason) {
     const files = workspaceFileList();
     RUN.listedKey = fileListingKey(files);   // the compacted history carries the list
     S.compactions.push({ before: S.messages.map(copyMessage), fromStep, toStep });
-    S.messages = buildCompactedMessages(S.messages, plan.cut, summary, toStep, files);
+    S.messages = buildCompactedMessages(S.messages, plan.cut, summary, toStep, files, currentPlan(S.timeline));
     const tokensAfter = estimateTokens(requestMessages(), RUN.tokenRatio);
     debugLog("result", `history compacted · steps ${fromStep}–${toStep} · ~${tokensBefore} → ~${tokensAfter} tokens`, clipForDebug(summary, 4000));
     addTimelineItem({ type: "compaction", reason, fromStep, toStep, summary, tokensBefore, tokensAfter });
@@ -8103,7 +8279,7 @@ function button(label, action, idx, cls, title) {
 }
 
 const VERDICT_LABELS = { auto: "✅ auto-committed", approved: "👍 approved", edited: "✏️ edited & approved", rejected: "↩️ rejected", "rolled back": "↩️ rolled back", "approved (network)": "🌐 approved with network" };
-const STATUS_LABELS = { unverified: "⚠️ files missing", ok: "ok", error: "error", timeout: "⏱ timeout", killed: "☠️ killed", crashed: "💥 crashed", rejected: "rejected", cutoff: "✂️ cut off", empty: "empty reply", broken: "unclosed code", mixed: "mixed reply", toolcall: "tool call", fakeobs: "no action", interrupted: "interrupted", textaction: "no tool call", badcall: "bad tool call" };
+const STATUS_LABELS = { unverified: "⚠️ files missing", ok: "ok", error: "error", timeout: "⏱ timeout", killed: "☠️ killed", crashed: "💥 crashed", rejected: "rejected", cutoff: "✂️ cut off", empty: "empty reply", broken: "unclosed code", mixed: "mixed reply", toolcall: "tool call", fakeobs: "no action", interrupted: "interrupted", textaction: "no tool call", badcall: "bad tool call", plan: "📋 plan only" };
 
 function renderThink(item, card, streaming) {
     if (!item.reasoning) return;
@@ -8145,8 +8321,8 @@ function renderFileActions(actions) {
     return ul;
 }
 
-const TOOL_PREVIEW_ICONS = { ...FILE_ACTION_ICONS, run_python: "🐍", ask_user: "❓", finish: "✅" };
-const TOOL_PREVIEW_VERBS = { ...FILE_ACTION_VERBS, run_python: "run Python", ask_user: "ask", finish: "finish" };
+const TOOL_PREVIEW_ICONS = { ...FILE_ACTION_ICONS, run_python: "🐍", update_plan: "📋", ask_user: "❓", finish: "✅" };
+const TOOL_PREVIEW_VERBS = { ...FILE_ACTION_VERBS, run_python: "run Python", update_plan: "plan", ask_user: "ask", finish: "finish" };
 
 // A native tool call while the model is still writing it: its arguments so far, read
 // from the partial JSON, so the code or file can be watched taking shape line by line.
@@ -8183,6 +8359,9 @@ function renderToolPreview(call) {
             pair.appendChild(el("pre", "edit-old", s(e.old_text)));
             if ("new_text" in e) pair.appendChild(el("pre", "edit-new", s(e.new_text) || "(deleted)"));
         }
+    } else if (call.name === "update_plan" && Array.isArray(args.plan)) {
+        const p = cleanPlan(args.plan).plan;
+        if (p) { meta.push(`${p.length} step${p.length === 1 ? "" : "s"} so far`); body = renderPlanList(p); }
     } else if (call.name === "ask_user" && s(args.question)) {
         body = el("p", "task-text", args.question);
     } else if (call.name === "finish" && s(args.answer)) {
@@ -8435,7 +8614,7 @@ function buildStepCard(item, idx, old) {
             card.appendChild(d);
         }
     } else if (item.kind !== "code" && item.status) {
-        card.appendChild(el("p", "hint", { cutoff: "✂️ The reply was cut off before it finished — nothing ran.", empty: "The reply was empty — nothing ran.", broken: "The reply had an unclosed code block or file tag — nothing ran.", mixed: "The reply mixed file actions with a code block — nothing ran.", toolcall: "The reply used a tool-call tag, which isn't how actions work here — nothing ran.", fakeobs: "The reply wrote its own <observation> instead of acting — nothing ran.", textaction: "The reply put code or file actions in its text instead of calling a tool — nothing ran.", badcall: "None of the reply's tool calls could run — nothing ran." }[item.status] || ""));
+        card.appendChild(el("p", "hint", { cutoff: "✂️ The reply was cut off before it finished — nothing ran.", empty: "The reply was empty — nothing ran.", broken: "The reply had an unclosed code block or file tag — nothing ran.", mixed: "The reply mixed file actions with a code block — nothing ran.", toolcall: "The reply used a tool-call tag, which isn't how actions work here — nothing ran.", fakeobs: "The reply wrote its own <observation> instead of acting — nothing ran.", textaction: "The reply put code or file actions in its text instead of calling a tool — nothing ran.", badcall: "None of the reply's tool calls could run — nothing ran.", plan: "📋 The reply only updated the plan — nothing else ran." }[item.status] || ""));
     }
     if ((item.skippedCalls || []).length) {
         const ul = el("ul", "step-notes skipped-calls");
@@ -8524,6 +8703,14 @@ function renderStepStats(stats) {
 
 function finishCard(card, item, idx) {
     if (item.type === "step") {
+        if ((item.plan || []).length) {
+            const d = el("details", "file-edits plan-update");
+            d.appendChild(el("summary", "", `📋 Updated the plan · ${planProgress(item.plan)}`));
+            d.appendChild(renderPlanList(item.plan));
+            card.appendChild(d);
+        }
+        // Code-as-action also lists it among the step's notes.
+        if (item.planError && !(item.notes || []).some(n => n.startsWith(item.planError))) card.appendChild(el("p", "hint", "📋 The plan update couldn't be read, so the plan stayed as it was: " + item.planError));
         if (item.retryNote) card.appendChild(el("p", "hint", item.retryNote));
         const stats = renderStepStats(item.stats);
         if (stats) card.appendChild(stats);
@@ -8665,7 +8852,42 @@ function renderTimelineItem(idx, isNew) {
     if (isNew || nearBottom) tl.scrollTop = tl.scrollHeight;
 }
 
+// DESIGN §5.7: a plan as a checklist; the text is text, never HTML.
+const PLAN_MARKS = { completed: ["✓", "done"], in_progress: ["▶", "in progress"], pending: ["○", "to do"] };
+function renderPlanList(plan) {
+    const ol = el("ol", "plan-list");
+    for (const p of plan || []) {
+        const [mark, label] = PLAN_MARKS[p.status] || PLAN_MARKS.pending;
+        const li = ol.appendChild(el("li", "plan-item is-" + p.status.replace("_", "-")));
+        const m = li.appendChild(el("span", "plan-mark", mark));
+        m.setAttribute("role", "img");
+        m.setAttribute("aria-label", label);
+        m.title = label;
+        li.appendChild(el("span", "plan-step", p.step));
+    }
+    return ol;
+}
+
+// The plan the agent is following, pinned above the timeline (collapsible; it keeps
+// whether you opened or closed it).
+function renderPlanPanel() {
+    const box = $("planPanel");
+    if (!box) return;
+    const cur = currentPlan(S.timeline);
+    box.hidden = !cur;
+    box.replaceChildren();
+    if (!cur) return;
+    const summary = box.appendChild(el("summary", "plan-summary"));
+    summary.appendChild(el("span", "plan-title", "📋 Plan"));
+    summary.appendChild(el("span", "plan-progress", planProgress(cur.plan)));
+    const now = cur.plan.find(p => p.status === "in_progress");
+    if (now) summary.appendChild(el("span", "plan-now", now.step));
+    box.appendChild(renderPlanList(cur.plan));
+    box.appendChild(el("p", "hint plan-from", `From step ${cur.n}. The agent keeps it up to date; to change it, send a note.`));
+}
+
 function renderTimeline() {
+    renderPlanPanel();
     const tl = $("timeline");
     tl.querySelectorAll("[data-idx]").forEach(n => n.remove());
     if (!S.timeline.length) {

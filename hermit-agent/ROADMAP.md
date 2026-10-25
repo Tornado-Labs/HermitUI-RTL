@@ -404,23 +404,79 @@ both protocols, so each one costs a schema, a tag, its parser, tests and prompt 
 
 ---
 
-## Phase 3.7 — A plan the user can see (`update_plan`) — *to discuss*
+## Phase 3.7 — A plan the user can see (`update_plan`)
 
-Next after 3.6, by the owner's call; the design is open. The idea, from Codex CLI's
-`update_plan`, Claude Code's TodoWrite and Manus's `todo.md`: the agent keeps a short
-list of steps with a status each, the UI pins it above the timeline, and it is sent
-again after every compaction, so a long task keeps its direction when the details are
-summarised away. For a supervised agent the plan is the part the user most wants to see:
-where it is going, not only what it just did.
+Next after 3.6, by the owner's call. The idea, from Codex CLI's `update_plan`, Claude
+Code's TodoWrite and Manus's `todo.md`: the agent keeps a short list of steps with a
+status each, the UI pins it above the timeline, and it is sent again after every
+compaction, so a long task keeps its direction when the details are summarised away. For a
+supervised agent the plan is the part the user most wants to see: where it is going, not
+only what it just did.
 
-Questions for the discussion:
-- Does an `update_plan` call end the step (a file-style action) or ride along with an
-  action in the same reply? Riding along saves a turn, but breaks "one reply = one
-  step".
-- Can the user edit the plan, and does an edit go to the model as guidance?
-- Required for long tasks, encouraged by the prompt, or left to the model?
-- How it survives compaction, rewind, export and import (session format 3?).
-- Whether small models (Phase 4) keep a plan up to date at all, or it goes stale.
+The five open questions were answered while building it (DESIGN §5.7; the alternatives
+are in [REVIEW_NOTES.md](REVIEW_NOTES.md)):
+- **Ends the step or rides along?** Rides along with any reply; a reply with only a plan
+  is a step of kind `plan` that runs nothing else. "One reply = one step" holds.
+- **Can the user edit it?** No: a note changes the agent's course, and the agent updates
+  the plan.
+- **Required?** Encouraged by the prompt for tasks of more than three or four steps,
+  with one reminder at step 2 when no plan has been sent yet (added after native runs
+  sent none).
+- **Compaction, rewind, export, import?** Stored on the step that sent it, the current
+  plan derived from the timeline; compaction appends it to the compacted task message;
+  no new session format.
+- **Small models?** Left to Phase 4; the success measurement records the plans sent.
+
+- [x] `update_plan` in both protocols (DESIGN §5.7): an `<update_plan>` checklist in
+      code-as-action, a native tool with `{ step, status }` items, set aside before "the
+      first action call decides", so it never makes another call skip.
+- [x] The pinned 📋 panel, the plan on each step card that sent one, the streaming
+      preview, the transcript.
+- [x] The plan through compaction, rewind and export/import.
+- [x] System prompt lines in both protocols.
+- [x] One reminder at step 2 when no plan has been sent (`planReminder`).
+- [x] Tests: unit (`tests/plan.test.mjs`), e2e (`plan`, both protocols), and the success
+      measurement records each run's plans (`plans`).
+
+**Exit criteria** (proposed with the build):
+- Pure logic covered by unit tests; the e2e `plan` scenario green in Chromium and
+  Playwright's Firefox; the existing suites stay green.
+- The 27-task suite passes **≥ 90 %** over 3 runs against a real model, in both
+  protocols (the prompt grew in both).
+- The model uses it: a plan in **at least half** of the runs that take more than 4 steps,
+  in both protocols (recorded in `plans`).
+
+**Result** (2026-10-24, Qwen3.8-27B IQ3_S on llama.cpp, one slot):
+- The suite passed **80/81 (99 %)** in code-as-action and **78/81 (96 %)** natively, both
+  without the reminder. ✅
+- Plans: code-as-action kept one in **15 of 23** runs of more than 4 steps ✅. Natively
+  the model sent **none in 81 runs** ❌. It reads the files first and never comes back to
+  the prompt's request. The step-2 reminder raised that to 3 of 8 longer runs (16/16
+  passed on the 8 longest tasks × 2), still under half; on the full suite with the final
+  build it was 1 of 17. **The criterion is missed for native tool calls.**
+- The final build (with the reminder) passed the full suite natively **80/81 (99 %)** in
+  39 min; the miss is the known `amount`/`total` flake of "data processing". The quick
+  selection passed 5/5 natively and 4/5 in code-as-action (the same flake; that task
+  then passed 3/3).
+- On a long multi-file task (a small library-loans app, now `tests/e2e_app.py`, 20k
+  context): natively, over 8 runs per side, the plan build passed 7/8 and kept a plan in
+  7, at 14.9 steps, 5.0 min and 130k prompt tokens on average, against 7/8, 16.5 steps,
+  5.5 min and 136k for v0.3.11. The first 3 runs per side had shown a larger gap (14.7
+  vs 17.7 steps); the next 5 shrank it (15.0 vs 15.8). In code-as-action (3 runs per
+  side, all passing, plans in 3 of 3) it was 10.0 steps and 2.3 min against 9.7 and 3.7.
+  So: no harm, maybe a small saving, nothing to claim.
+- Compaction: the plan goes back to the model after each summary, so it might keep a
+  compacted run on track. At a 15k context, code-as-action, 3 runs per side, all passed
+  either way: 12.3 steps, 3.8 min and 7 compactions with the plan (kept in 3 of 3)
+  against 11.7 steps, 3.2 min and 6 compactions for v0.3.11. No benefit shows at this
+  size; it isn't a reason to have the plan.
+- The plan gives no gain in success rate. Its value is visibility. The model updates it
+  coarsely, and natively each update costs a turn, since the model makes one call per
+  reply and doesn't send a plan alongside an action.
+- Seen along the way: on this model code-as-action beat native on speed. The suite took
+  35 vs 45 min, at 6.5 vs 9.2 s and 227 vs 295 output tokens per step. The causes are
+  JSON escaping, one call per reply (code-as-action wrote 7 files in one reply, native
+  one per reply) and per-turn overhead.
 
 ---
 

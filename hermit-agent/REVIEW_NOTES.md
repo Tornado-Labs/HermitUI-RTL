@@ -1,7 +1,7 @@
-# Decisions to review (Phase 1 MVP build, Phases 2a, 2b, 3, 3.5 and 3.6, prompt review)
+# Decisions to review (Phase 1 MVP build, Phases 2a, 2b, 3, 3.5, 3.6 and 3.7, prompt review)
 
 Open decisions from the MVP (2026-10-03), Phases 2a and 2b (2026-10-05), Phase 3
-(2026-10-05), Phase 3.5 and Phase 3.6 (2026-10-06), waiting for the owner's call. Each entry says what was decided, why, and
+(2026-10-05), Phase 3.5 and Phase 3.6 (2026-10-06), Phase 3.7 (2026-10-23), waiting for the owner's call. Each entry says what was decided, why, and
 what the alternative is. When you confirm or reverse one, delete it
 here; if you reverse it, update DESIGN.md too. The ⭐ entries are the ones most worth a
 look.
@@ -375,6 +375,45 @@ the choices made building it (DESIGN §5.1, §2.3).
   answer goes through the composer.
 - **The quick selection is unchanged** (5 tasks). The two new tasks are in the full
   suite only.
+
+## Phase 3.7 (a plan the user can see), decided while building it
+
+The roadmap left five questions open; these are the answers the build took.
+- ⭐ **`update_plan` rides along** with any reply: code, file actions, an ask, the final
+  answer. One reply stays one step, and the plan is part of it. A reply with *only* a plan
+  is a step of kind `plan` that runs nothing else. Alternative: a file-style action that
+  ends the step, which costs a turn per update (a 10-step task with 4 updates: 14 turns).
+- ⭐ **The user can't edit the plan.** A note (guidance) changes the agent's course, and
+  the agent updates the plan; the panel says so. Alternative: an editable panel whose
+  edit is sent as guidance. It was left out because it makes two writers of one list
+  (what if the model sends a plan while you edit?) for little gain over a note.
+- ⭐ **Encouraged, not required:** the prompt asks for a plan on tasks of more than three
+  or four steps and says to skip it for short ones.
+- ⭐ **One reminder at step 2**, and only if no plan has been sent yet: a note in that
+  step's observation (or, if step 2 ran nothing, the next step that runs something)
+  asks for a plan if the task will take more than a few more steps, and says to skip it
+  when nearly done. It was added after measuring without one: with
+  Qwen3.8-27B code-as-action kept a plan in 15 of 23 longer runs, native in **none of
+  81**. Natively the model reads the files first and never comes back to the plan. With
+  the reminder, native kept one in 3 of 8 longer runs, but in only 1 of 17 on the full
+  suite: it helps on long tasks (the app task kept one in 7 of 8), little on short ones.
+  Alternatives: no reminder (native
+  then shows no plan at all), or a repeating one every N steps without a plan, as Claude
+  Code does for its todo list. That costs prompt tokens on every long run and nags on
+  tasks that don't need a plan.
+- ⭐ **Stored on the step that sent it**, the current plan derived from the timeline: rewind
+  needs nothing, and export carries it per step with no new session format (an older
+  version drops the field). Compaction appends the current plan to the compacted task
+  message.
+- ⭐ **Prose next to a plan with open steps isn't a final answer** (code-as-action): "I'll
+  read the file first" plus a plan would otherwise end the task. The cost: a model that
+  answers without ticking off its last step gets one more turn to send the answer again.
+- **A plan-only step counts against the step limit**, like any other step.
+- **Native plan results are one short line** ("Plan updated (1 of 3 done).") rather than
+  an `<observation>` envelope; in code-as-action a plan that was read adds nothing to the
+  observation, only an unreadable one adds a note. Both keep the per-step overhead small.
+- **Small models keeping a plan up to date** (question 5) is left to Phase 4. The
+  success measurement records the plans sent (`plans`), so a stale plan can be spotted.
 
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 

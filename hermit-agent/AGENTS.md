@@ -9,12 +9,12 @@ explicitly overrides it. If you are an AI agent, read the root file first.
 
 ## Status
 Phase 1 (MVP), Phase 2a (reliability), Phase 2b (rich output), Phase 3 (native tool
-calls), Phase 3.5 (bundled pure-Python libraries) and Phase 3.6 (more file tools) are
-built: `src/` →
+calls), Phase 3.5 (bundled pure-Python libraries), Phase 3.6 (more file tools) and
+Phase 3.7 (a plan the user can see) are built: `src/` →
 `build.py` → `dist/hermit-agent-standalone.html`. The source of truth is
 [DESIGN.md](DESIGN.md), and the current phase is in [ROADMAP.md](ROADMAP.md). If an
 implementation needs to deviate from the design, update DESIGN.md in the same commit.
-Open decisions waiting for review (the MVP build, Phases 2a, 2b, 3, 3.5 and 3.6) are listed in
+Open decisions waiting for review (the MVP build, Phases 2a, 2b, 3, 3.5, 3.6 and 3.7) are listed in
 [REVIEW_NOTES.md](REVIEW_NOTES.md).
 
 ## Build & test
@@ -24,6 +24,7 @@ node tests/run.mjs                                 # unit tests (pure logic)
 ../benchmark/.venv/bin/python tests/e2e_agent.py   # e2e vs. a mock endpoint, Chromium + Firefox
 ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 --runs 3   # real model: success rate (--tool-mode native|text)
 ../benchmark/.venv/bin/python tests/e2e_coding.py --base-url http://localhost:9931/v1           # real model: six coding tasks, hidden tests
+../benchmark/.venv/bin/python tests/e2e_app.py --base-url http://localhost:9931/v1              # real model: one long multi-file app task
 ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1           # real model: 20+ steps through outages
 ```
 **Real-model runs scale with the change.** The full suite (24 tasks × 3 runs, ~20 min

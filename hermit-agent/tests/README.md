@@ -8,6 +8,7 @@ node tests/run.mjs                                              # unit tests (al
 python3 build.py && ../benchmark/.venv/bin/python tests/e2e_agent.py [chromium] [firefox] [firefox=/path/to/stock/firefox]
 ../benchmark/.venv/bin/python tests/e2e_reference.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
 ../benchmark/.venv/bin/python tests/e2e_coding.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text]
+../benchmark/.venv/bin/python tests/e2e_app.py --base-url http://localhost:9931/v1 [--runs 3] [--tool-mode native|text] [--context-size 20000]
 ../benchmark/.venv/bin/python tests/e2e_longrun.py --base-url http://localhost:9931/v1 [--runs 5]
 ```
 
@@ -115,6 +116,17 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
     bytes past 32 bytes, control characters) don't; every cp1252 byte round-trips; read,
     search, edit, write and move-then-edit keep a file's encoding, and an edit cp1252
     can't hold is refused, naming the characters.
+
+- **`plan.test.mjs`** covers Phase 3.7 (DESIGN §5.7): `cleanPlan` (synonyms, the 12-step
+  and 200-character caps), the checklist both ways (`formatPlan`, `parsePlanText`), the
+  `<update_plan>` tag riding along with code, file actions and `ask:`, alone (kind `plan`),
+  with prose (a plan with open steps isn't a final answer; one with every step done is),
+  unclosed, unreadable, twice, and inside a written file's content; native `update_plan`
+  next to `run_python`, between file calls (still one batch), alone, with `finish` and
+  `ask_user`, with bad arguments, twice and next to an unknown tool, and its text form;
+  both system prompts; the plan in a compacted history; `currentPlan` across a rewind;
+  `validateSession` and the transcript; `planReminder` (from step 2 on, only without a
+  plan, once, worded per protocol, the flag kept by an import).
 
 - **`filetools.test.mjs`** covers Phase 3.6 (DESIGN §5.1): the `search_files`,
   `delete_file` and `move_file` tags (quoted `>` in a pattern, a trailing `/`, the whole
@@ -281,6 +293,13 @@ it stall, on cue; see its docstring):
     text (with the encoding named for Python), edited, refused an arrow it can't hold,
     read back by Python with `encoding="cp1252"`, still cp1252 byte for byte, and shown
     as text in the viewer, which names the encoding.
+23. **The plan** (`plan`): a reply with only a plan is its own step and the model is told
+    nothing else ran; a plan next to code lets the code run; after an auto-compaction the
+    model gets its last plan back; prose next to a finished plan is the final answer; the
+    pinned panel and the step cards show the plans; a rewind shows that step's plan; the
+    transcript lists it, and export → import brings it back. Natively, `update_plan` next
+    to `run_python` gets its own result, skips nothing, and a plan sent with `finish`
+    counts.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters
@@ -315,7 +334,9 @@ used a bundled library is recorded (`library_used`) but doesn't decide the pass.
 3.6 added two (27 in all): renaming a function across a small project with folders
 (no file may still name it, and the project's tests must pass) and tidying up your files
 (CSVs into `data/`, a PNG into `assets/` byte for byte, the `.tmp` files deleted); which
-file tools the agent used is recorded (`tools_used`), not required. `--runs N` repeats the suite; the result is one pass rate, plus a
+file tools the agent used is recorded (`tools_used`), not required. Since Phase 3.7 every
+run also records the plans the agent sent (`plans`, each as "done/steps"), and the
+summary counts the runs that kept one; a plan is never required. `--runs N` repeats the suite; the result is one pass rate, plus a
 per-task table and a JSON file in `tests/results/` (gitignored). The script approves
 held steps, logging their reasons, and answers `ask:` questions generically. It checks
 the results inside the same interpreter, or against the final answer. The four tasks
@@ -345,6 +366,17 @@ evaluator (run with `eval`, `exec` and `compile` replaced by a function that fai
 write tests for an interval `merge()` that catch four planted bugs (mutation testing).
 The three that change an uploaded file must be held for it, as in the reference suite.
 `--quick` runs the bug hunt, the performance fix and the LRU cache.
+
+## Real model, an application — `e2e_app.py`
+
+One long task, run by the same runner (results in `tests/results/app-*.json`): build a
+library-loans application from a written spec (a `library/` package with models, a store
+with lending rules and late fees, JSON save and load, reports; a `cli.py`; at least 8
+passing unit tests of its own; a README with a usage section). The hidden check imports
+the package and exercises every rule, round-trips a save, drives the CLI through
+`runpy`, and runs the agent's own tests. With Qwen3.8-27B it takes 10 to 20 steps and
+2 to 7 minutes, so it is where the plan, compaction (`--context-size 20000`) and the
+cost per turn of each protocol show. It has no `--quick` selection.
 
 ## Real model, long run — `e2e_longrun.py`
 

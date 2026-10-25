@@ -777,6 +777,7 @@ already emits the shape a tool call will produce, `{ tool, args }`, which
 | `delete_file` *(3.6)* | `path` |
 | `move_file` *(3.6)* | `path`, `new_path` |
 | `ask_user` | `question`; *(3.6)* `options`: up to 6 strings |
+| `update_plan` *(3.7)* | `plan`: array of `{ step, status }`, status `pending` / `in_progress` / `completed` (§5.7) |
 
 *As built (Phase 3):*
 - **Setting:** Settings → *Actions*: **Auto** (default), *Native tool calls*, or *Code blocks
@@ -791,7 +792,7 @@ already emits the shape a tool call will produce, `{ tool, args }`, which
   header badge beside 🏠 local says which one the next request uses: 🔧 native, 📝 text,
   or 🔧 auto until the endpoint has been probed (before the first request, or by Test
   Connection of the saved endpoint).
-- **Request:** the six tools (nine since Phase 3.6), `parallel_tool_calls: true`, otherwise unchanged. The system
+- **Request:** the six tools (nine since Phase 3.6, ten since 3.7), `parallel_tool_calls: true`, otherwise unchanged. The system
   prompt keeps the environment section and swaps the response-format section for one that
   describes the tools; `S.protocol` records which one `messages[0]` holds, and it is
   switched (`syncSystemPrompt`) when the next request uses the other protocol.
@@ -832,6 +833,68 @@ already emits the shape a tool call will produce, `{ tool, args }`, which
   It is a preview only, as text (an answer through `renderMarkdown`); what runs comes
   from the finished arguments, and none of it is kept in the session. Session format 2 adds `tool_calls`, `tool`
   messages, `protocol` (session and step) and `skippedCalls`; format 1 still imports.
+
+### 5.7 A plan the user can see *(built in Phase 3.7)*
+The agent keeps a short list of steps with a status each (after Codex CLI's
+`update_plan`, Claude Code's TodoWrite and Manus's `todo.md`). The UI pins it above the
+timeline, and it goes back to the model after every compaction, so a long task keeps its
+direction when the details are summarised away. For a supervised agent the plan is what
+the user most wants to see: where it is going, not only what it just did.
+
+```
+<update_plan>                                    code-as-action
+- [x] Read data.csv
+- [>] Compute the monthly totals
+- [ ] Write report.md
+</update_plan>
+
+update_plan({"plan": [{"step": "Read data.csv", "status": "completed"}, …]})   native
+```
+
+- **It rides along.** A plan update goes with any reply: next to code, file actions,
+  `ask:` / `ask_user`, or the final answer. One reply is still one step; the plan is
+  part of it, not a step of its own. A reply with *only* a plan is kind `plan`: it runs
+  nothing else, the observation says so (status ok), and the model goes on next turn.
+  In code-as-action, prose next to a plan counts as the final answer only when every
+  step of that plan is done; otherwise "I'll start by reading the file" plus a plan
+  would end the task. Native: `parseToolCalls` sets the `update_plan` calls aside before
+  "the first action call decides", so a plan call never makes another call skip, and file
+  calls on both sides of one still run as one batch. Each plan call gets its own tool
+  result ("Plan updated (1 of 3 done)."); with `finish` or `ask_user` only the ending call
+  stays in the history, and the plan still counts.
+- **Format:** at most 12 steps (more are cut, with a note), one line of at most 200
+  characters each. The checklist reads `[x]`/`[X]` as done, `[>]` (also `[~]`, `[-]`,
+  `[*]`, `[/]`) as in progress, `[ ]` or a bare bullet as to do; native statuses accept
+  common synonyms (`done`, `in-progress`, `active`, …), anything else is to do. The last
+  plan of a reply counts. An unreadable plan changes nothing and says why (a note in
+  code-as-action, the call's result natively); the rest of the reply still runs. An
+  unclosed `<update_plan>` is `broken`, like an unclosed file tag. The tag must start a
+  line, and is read after the file actions, so a plan inside a written file's content is
+  content.
+- **Encouraged, not required:** the prompt asks for a plan on tasks of more than three or
+  four steps, sent again (the whole list) when a step is done or the plan changes, and
+  says to skip it for short tasks. Nothing is enforced: a model that never sends one
+  works as before.
+- **One reminder:** if no step has sent a plan by step 2 (`LIMITS.planReminderStep`),
+  the observation of the first step from then on that runs something (code or file
+  actions; usually step 2 itself) carries one note (`planReminder`): send a plan now if
+  the task takes more than a few more steps, alongside the next action, or skip it when
+  nearly done. It is sent once (`step.planReminded`, kept by export and import; a rewind
+  past that step makes it due again) and never repeated. Without it, Qwen3.8-27B never sent a plan
+  with native tool calls (0 of 81 runs): it reads the files first and doesn't come back
+  to the prompt's request.
+- **State:** the plan is stored on the step that sent it (`step.plan`); the current plan
+  is the last one in the timeline (`currentPlan`). Rewind cuts the timeline, so the plan
+  goes back with it; export and import carry `plan` per step (validated like the rest of
+  a step, text only), with no new session format: an older version ignores the field.
+- **Compaction** appends the current plan to the compacted task message, after the file
+  list: "Your plan, as your last update_plan (step N) left it:" plus the checklist.
+- **UI:** a collapsible 📋 panel above the timeline shows the current plan (done struck
+  through, the current step bold) with "2 of 5 done", and the current step when
+  collapsed; it is hidden while there is no plan. A step that sent a plan shows it,
+  collapsed, on its card; a plan-only step says it ran nothing else; the streaming preview
+  shows a plan call taking shape; the transcript lists each plan. The user can't edit the
+  plan: a note (guidance) changes the agent's course, and the agent updates the plan.
 
 ---
 

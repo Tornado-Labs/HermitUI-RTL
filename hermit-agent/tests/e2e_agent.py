@@ -284,6 +284,17 @@ plt.figure(); plt.plot([1, 1])
             py('print(repr(open("de.csv", encoding="cp1252").read()))'),
             final("Done."),
         ],
+        "E2E-PLAN": [
+            final("I'll print three letters.\n<update_plan>\n- [>] Print a\n- [ ] Print b\n- [ ] Print c\n</update_plan>"),
+            {"content": "<update_plan>\n- [x] Print a\n- [>] Print b\n- [ ] Print c\n</update_plan>\n```python\nprint('a')\n```"},
+            {"content": "<update_plan>\n- [x] Print a\n- [x] Print b\n- [>] Print c\n</update_plan>\n```python\nprint('b')\n```"},
+            *[py(f"print('c{i}')") for i in range(4, 10)],
+            final("<update_plan>\n- [x] Print a\n- [x] Print b\n- [x] Print c\n</update_plan>\nPrinted **a**, **b** and **c**."),
+        ],
+        "E2E-NPLAN": [
+            calls(("update_plan", {"plan": [{"step": "Print one", "status": "in_progress"}, {"step": "Answer", "status": "pending"}]}), ("run_python", {"code": "print(1)"})),
+            calls(("update_plan", {"plan": [{"step": "Print one", "status": "completed"}, {"step": "Answer", "status": "completed"}]}), ("finish", {"answer": "Done."})),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -1806,6 +1817,75 @@ def edit_fix_scenario(browser, port, state):
     page.context.close()
 
 
+def plan_panel(page):
+    return page.evaluate("""() => { const p = document.getElementById('planPanel');
+        return { hidden: p.hidden, progress: p.querySelector('.plan-progress')?.textContent || '',
+                 steps: [...p.querySelectorAll('.plan-item')].map(li => li.className.replace('plan-item is-', '') + ':' + li.querySelector('.plan-step').textContent) }; }""")
+
+
+def plan_scenario(browser, port, state, downloads=True):
+    print("— the plan: pinned, rides along, survives compaction, rewind and export (text + native)")
+    page = open_app(browser)
+    configure(page, port, 10)
+    check("no plan, no panel", plan_panel(page)["hidden"] is True)
+    page.click("#settingsBtn")
+    page.fill("#settingAutoCompact", "75")
+    page.fill("#settingContextSize", "100")   # the mock reports 100 prompt tokens: compacts at step 7
+    page.click("#settingSave")
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-PLAN: print letters")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 90, "plan task done")
+    agent = [r for r in state.requests[n0:] if SUMMARISER_MARK not in r["messages"][0]["content"]]
+    first = page.evaluate("() => S.timeline.find(t => t.type === 'step' && t.n === 1)")
+    check("a reply with only a plan is its own step, not a final answer", first["kind"] == "plan" and first["status"] == "plan", (first["kind"], first["status"]))
+    check("…the model is told nothing else ran", "Nothing but the plan ran" in agent[1]["messages"][-1]["content"], agent[1]["messages"][-1]["content"])
+    check("the plan rode along with code: step 2 ran", "a" in page.evaluate("() => S.timeline.find(t => t.type === 'step' && t.n === 2).output"))
+    after = [r for r in agent if any('<history_summary steps="1-' in m["content"] for m in r["messages"][:2])]
+    check("after a compaction the model gets its plan back",
+          after and 'Your plan, as your last update_plan (step 3) left it:\n- [x] Print a\n- [x] Print b\n- [>] Print c' in after[0]["messages"][1]["content"],
+          after[0]["messages"][1]["content"][-300:] if after else "no compaction")
+    final_step = page.evaluate("() => S.timeline.filter(t => t.type === 'step').pop()")
+    check("prose next to a finished plan is the final answer", final_step["kind"] == "final" and "Printed" in final_step["content"])
+    panel = plan_panel(page)
+    check("the panel shows the latest plan", not panel["hidden"] and panel["progress"] == "3 of 3 done" and panel["steps"][0] == "completed:Print a", panel)
+    check("the step that set a plan shows it", page.locator(".step-card .plan-update").count() == 4)
+    check("a plan-only step says so", "only updated the plan" in page.inner_text(".step-card >> nth=0"))
+    idx = page.evaluate("() => S.timeline.findIndex(t => t.type === 'step' && t.n === 2)")
+    page.locator(f'[data-idx="{idx}"] [data-action=rewind]').click()
+    page.click("#confirmOk")
+    wait_until(page, "() => S.status === 'paused' && PY.state === 'idle'", 60, "rewind")
+    panel = plan_panel(page)
+    check("rewound to step 2: the panel shows step 2's plan", panel["progress"] == "1 of 3 done" and panel["steps"][1] == "in-progress:Print b", panel)
+    if downloads:
+        with page.expect_download() as dl:
+            page.click("#exportBtn")
+            page.click("#exportSessionBtn")
+        zpath = str(pathlib.Path(tempfile.mkdtemp()) / "plan-session.zip")
+        dl.value.save_as(zpath)
+        check("the transcript lists the plan", "Updated the plan (1 of 3 done):\n\n- [x] Print a\n- [>] Print b" in zipfile.ZipFile(zpath).read("transcript.md").decode())
+        page.context.close()
+        page = open_app(browser)
+        page.set_input_files("#importInput", zpath)
+        wait_until(page, "() => S.status === 'paused' && S.timeline.length > 0", 30, "import")
+        check("…and the plan comes back with an import", plan_panel(page) == panel, plan_panel(page))
+    page.context.close()
+
+    page = open_app(browser)
+    configure_at(page, f"http://127.0.0.1:{port}/tools/v1", 10)
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-NPLAN: go")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "native plan task done")
+    tools = {m["tool_call_id"]: m["content"] for m in state.requests[n0 + 1]["messages"] if m["role"] == "tool"}
+    plan_res = [c for i, c in tools.items() if c.startswith("Plan updated")]
+    check("native: update_plan gets its own result", plan_res == ["Plan updated (0 of 2 done)."], tools)
+    check("…and run_python in the same reply ran", any("<observation" in c and "1" in c for c in tools.values()), tools)
+    check("…nothing was skipped", page.evaluate("() => (S.timeline.find(t => t.type === 'step' && t.n === 1).skippedCalls || []).length") == 0)
+    check("native: a plan sent with finish counts", plan_panel(page)["progress"] == "2 of 2 done", plan_panel(page))
+    page.context.close()
+
+
 DE_CSV = "Name;Grüße\nMüller;5 €\n".encode("cp1252")
 
 
@@ -1956,6 +2036,8 @@ def main():
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)
+                if want("plan"):
+                    plan_scenario(browser, port, state, downloads=not exe)
                 if want("module"):
                     module_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("packages", packages_scenario), ("bundled", bundled_scenario), ("elide", elide_scenario)]:

@@ -31,7 +31,7 @@
   </a>
 </div>
 
-> **Status: v0.3.12** (Phase 3.6, more file tools). One self-contained HTML file,
+> **Status: v0.3.13** (Phase 3.7, a plan you can see). One self-contained HTML file,
 > [`dist/hermit-agent-standalone.html`](dist/hermit-agent-standalone.html) (about 11 MB,
 > Python included). It is developed here, separately from the main app in
 > [`../src/`](../src/), so it can move fast without destabilising HermitUI.
@@ -64,6 +64,7 @@ The agent needs a model that can recover from its own errors. The reference task
 
 - **Every step is visible:** the model's reasoning, the precise code, the result, the graphs and pictures it created, and a diff of the modified files.
 - **Risky steps wait for you.** Harmless steps run on their own. A step that deletes, overwrites or moves one of your files, or tries to reach the network, stays put until you approve it.
+- **You see where it is going.** On longer tasks the agent keeps a short plan, pinned above the steps, and ticks steps off as it goes. A note from you changes its course; it then updates the plan.
 - **Every step can be undone.** The workspace saves a checkpoint after each step, and you can rewind to any of them.
 - **It can't touch your machine.** Python runs as WebAssembly (Pyodide) in a Web Worker. The agent only sees the in-memory workspace where you put files.
 - **Sessions go where you put them.** Export a whole session (conversation, steps, workspace, checkpoints) to one zip file and import it later to resume or review it. The app itself remembers nothing.
@@ -118,6 +119,6 @@ It keeps the same brand and philosophy: one HTML file, vanilla JS, no persistenc
 | [PHASE0_FINDINGS.md](PHASE0_FINDINGS.md) | What the Phase 0 spike measured: offline boot, kill & re-seed, network blocking, GitHub Pages |
 | [PHASE3_5_LIBRARY_STUDY.md](PHASE3_5_LIBRARY_STUDY.md) | Which pure-Python libraries to bundle: cost, whether they work in Pyodide, and what the model reaches for |
 | [AGENTS.md](AGENTS.md) | Rules for anyone (human or AI) working in this folder, build & test commands |
-| [REVIEW_NOTES.md](REVIEW_NOTES.md) | Open decisions (MVP, Phases 2a, 2b, 3 and 3.5), waiting for a review |
+| [REVIEW_NOTES.md](REVIEW_NOTES.md) | Open decisions (MVP, Phases 2a, 2b, 3, 3.5, 3.6 and 3.7), waiting for a review |
 | [tests/README.md](tests/README.md) | What the unit, end-to-end and real-model tests cover |
 | [index.html](index.html) | The [project page](https://moooff.github.io/HermitUI/hermit-agent/), with the demo videos |
