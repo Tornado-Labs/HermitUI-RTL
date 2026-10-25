@@ -457,6 +457,25 @@ From comparing pi, opencode and Claude Code (opencode's `doom_loop`).
 - **Only on the task card.** A follow-up can't be edited this way; rewinding to the step
   before it and sending a new follow-up does the same.
 
+## Plan first (v0.3.18, 2026-10-24), decided while building it
+
+- ⭐ **An autonomy level, not a separate agent.** opencode switches to a Plan agent with
+  other permissions; here the existing gate does it: while the plan waits, every file
+  change is rolled back. Alternative: hide the writing tools while planning, which
+  changes the tool list mid-session (the prompt prefix the server caches) and doesn't
+  help code-as-action.
+- ⭐ **Python runs while planning.** Reading an Excel file or a SQLite database needs it,
+  and the effect gate sees whether a run wrote anything. Alternative: block code until
+  approval, as opencode blocks edits (it allows bash, though).
+- ⭐ **Approved = risk-based from then on.** Alternative: keep asking for every step
+  (Approve each step) or drop to Autopilot.
+- ⭐ **The approval is a timeline note**, so a rewind past it takes it back, and export
+  carries it. It counts as part of the record, not as a pending approval, so the rule
+  that imports never carry approvals over (DESIGN §3.3) isn't touched: the imported
+  session still starts paused.
+- **A step that sends a plan pauses the run**, even a plan sent alongside code that only
+  read. A model that answers without a plan (a plain question) just finishes.
+
 ## Text encodings (v0.3.12, 2026-10-23), decided while building it
 
 - ⭐ **A Windows-1252 file keeps its encoding** (option (b) of 2026-10-09). Before, a

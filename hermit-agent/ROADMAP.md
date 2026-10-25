@@ -493,8 +493,9 @@ public docs. Each is a small patch release of its own.
       every step.
 - [x] **Rewind to the start gives the task back** (opencode's `/undo`; v0.3.17): the
       task text goes back into the composer, to be rephrased.
-- [ ] **Plan first** (opencode's Plan agent, Claude Code's plan mode): an autonomy level
-      where the agent may only read, search and send a plan until the user approves it.
+- [x] **Plan first** (opencode's Plan agent, Claude Code's plan mode; DESIGN §2.3,
+      v0.3.18): an autonomy level where the agent may only read, search and send a plan
+      until the user approves it.
 - **Not taken, for now:** branches instead of a cut on rewind (pi's session tree, Claude
   Code's fork: a timeline and session-format change, worth it only if rewinding gets
   used a lot); a smaller prompt for small models (pi keeps its prompt and tools under

@@ -125,7 +125,9 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
   next to `run_python`, between file calls (still one batch), alone, with `finish` and
   `ask_user`, with bad arguments, twice and next to an unknown tool, and its text form;
   both system prompts; the plan in a compacted history; `currentPlan` across a rewind;
-  `validateSession` and the transcript; `planReminder` (from step 2 on, only without a
+  `validateSession` and the transcript; Plan first (`effectiveAutonomy`: plan until an
+  approval note, risk-based after, a rewind takes it back; the notes and the level
+  survive an import); `planReminder` (from step 2 on, only without a
   plan, once, worded per protocol, the flag kept by an import).
 
 - **`guard.test.mjs`** covers the loop guard (DESIGN §5.8): `actionSignature` (code
@@ -318,6 +320,10 @@ it stall, on cue; see its docstring):
 26. **Edit the task** (`edit_task`): rewinding to the task card offers ✏️ Edit the task
     (a step's rewind doesn't); it puts the task text back in the composer, empties the
     session, restores the workspace to the start, and sending starts the task anew.
+27. **Plan first** (`plan_first`): the task message tells the model to plan first; code
+    that writes and a `write_file` are rolled back or refused with the reason, nothing
+    is written; a step with a plan pauses with 👍 Approve the plan; approving tells the
+    model, and the next write is applied.
 
 Stock Firefox (`firefox=<binary>`, driven over WebDriver BiDi) runs everything except
 the download-based checks, which Playwright can't capture over BiDi. It matters

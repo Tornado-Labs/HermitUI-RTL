@@ -311,6 +311,13 @@ plt.figure(); plt.plot([1, 1])
             py("open('made.txt', 'w').write('x')"),
             final("Done."),
         ],
+        "E2E-FIRSTPLAN": [
+            py("open('out.txt', 'w').write('early')"),
+            final('<write_file path="w.txt">\nhi\n</write_file>'),
+            {"content": "<update_plan>\n- [>] Write out.txt\n- [ ] Report\n</update_plan>\n```python\nprint('looked around')\n```"},
+            py("open('out.txt', 'w').write('approved')"),
+            final("<update_plan>\n- [x] Write out.txt\n- [x] Report\n</update_plan>\nWrote **out.txt**."),
+        ],
         "E2E-NCLOSEST": [
             calls(("write_file", {"path": "q.py", "content": 'print("hi")\n'})),
             calls(("edit_file", {"path": "q.py", "edits": [{"old_text": 'print(\\"hi\\")', "new_text": 'print(\\"bye\\")'}]})),
@@ -2015,6 +2022,31 @@ def edit_task_scenario(browser, port, state):
     page.context.close()
 
 
+def plan_first_scenario(browser, port, state):
+    print("— Plan first: changes are rolled back until the user approves the plan")
+    page = open_app(browser)
+    configure(page, port, 10)
+    page.select_option("#autonomySelect", "plan")
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-FIRSTPLAN: write out.txt")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'paused'", 60, "paused for the plan")
+    first = state.requests[n0]["messages"][1]["content"]
+    check("the model is told to plan first", "plan before anything changes" in first, first[-400:])
+    steps = page.evaluate("() => S.timeline.filter(t => t.type === 'step').map(t => [t.decision, t.decidedBy, t.rejectReason || ''])")
+    check("while planning, code that writes a file is rolled back, with the reason", steps[0][0] == "rejected" and steps[0][1] == "auto" and "approved your plan" in steps[0][2], steps)
+    check("…a file action that writes is refused too", steps[1][0] == "rejected" and "approved your plan" in steps[1][2], steps)
+    check("…and nothing was written", [p for p, h, o in workspace(page)] == [])
+    check("a step that sent a plan pauses for review, with an approve button", page.locator("[data-action=approve-plan]").count() == 1 and "ready for your review" in page.inner_text("#timeline"))
+    page.click("[data-action=approve-plan]")
+    wait_until(page, "() => S.status === 'done'", 60, "done after approval")
+    after = next(r for r in state.requests[n0:] if "approved your plan" in r["messages"][-1]["content"])
+    check("the approval goes to the model", bool(after))
+    check("after it, the change is applied", page.evaluate("() => new TextDecoder().decode(WS.blobs.get(WS.files.get('out.txt').hash))") == "approved")
+    check("…and the approve button is gone", page.locator("[data-action=approve-plan]").count() == 0)
+    page.context.close()
+
+
 MD_REPORT = """# Report
 
 Some **bold** text.
@@ -2134,7 +2166,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("edit_task", edit_task_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("edit_task", edit_task_scenario), ("plan_first", plan_first_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

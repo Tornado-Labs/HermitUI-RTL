@@ -118,9 +118,22 @@ This is the core of the product. Everything else serves it.
   | Level | Behaviour |
   |---|---|
   | Approve each step | Every step waits: **Run / Edit / Reject** |
+  | Plan first *(v0.3.18)* | The agent looks around and sends a plan; until you approve it, file changes are rolled back. Then risk-based |
   | **Risk-based (default)** | Steps whose effect is harmless commit automatically; risky ones wait (see §2.3) |
   | Autopilot | Everything commits; the run stops at the step limit, on a timeout, or when the task finishes |
 
+- **Plan first** *(v0.3.18, after opencode's Plan agent and Claude Code's plan mode)*:
+  the model is told at the start (a note on the task message, or on its next request
+  when the level is switched mid-session) to look around, send its plan and wait. Until
+  the plan is approved, effect gating does the rest: Python runs, but any file change is
+  rolled back automatically (status rejected, with the reason), and file actions that
+  write are refused; reads, searches and network-free Python that only reads go
+  through. After a step that sent a plan, the run pauses with a note and **👍 Approve
+  the plan**; a note instead sends feedback, and the agent revises. The approval is a
+  note in the timeline (`planApproved`), so a rewind past it takes it back and export
+  carries it (`effectiveAutonomy`). From then on the session is risk-based. Unlike
+  opencode's Plan agent, Python isn't blocked while planning: reading an Excel file or a
+  database needs it, and the sandbox can tell a run that only reads from one that writes.
 - **Edit before run:** change the agent's code and run your version. The model is
   told the code was edited and sees the edited version, so it doesn't get confused
   about what actually ran. *As built:* in the editor Tab indents (Shift+Tab leaves the

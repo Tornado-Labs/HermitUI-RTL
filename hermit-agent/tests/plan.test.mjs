@@ -134,4 +134,17 @@ section("6. The one reminder, from step 2 on");
     check("import keeps that a step carried the reminder (only a true)", kept[0].planReminded === true && !("planReminded" in kept[1]));
 }
 
+section("7. Plan first");
+{
+    const tl = (...extra) => [{ type: "task", text: "x" }, { type: "step", n: 1 }, ...extra];
+    check("other levels pass through", X.effectiveAutonomy("risk", tl()) === "risk" && X.effectiveAutonomy("approve", tl()) === "approve" && X.effectiveAutonomy("autopilot", []) === "autopilot");
+    check("Plan first before an approval: plan", X.effectiveAutonomy("plan", tl({ type: "note", planAsk: true, text: "ready" })) === "plan");
+    check("…after the approval note: risk-based", X.effectiveAutonomy("plan", tl({ type: "note", planApproved: true, text: "ok" })) === "risk");
+    check("…a rewind past it (the timeline cut) takes it back", X.effectiveAutonomy("plan", tl({ type: "note", planApproved: true }).slice(0, 2)) === "plan");
+    check("the model is told to look around and send a plan first", /plan before anything changes/.test(X.PLAN_FIRST_NOTE) && /run Python that only reads/.test(X.PLAN_FIRST_NOTE));
+    check("a rolled-back change says why", /hasn't approved your plan yet/.test(X.PLAN_FIRST_REJECT));
+    const v = X.validateSession({ task: "x", messages: [{ role: "system", content: "S" }], timeline: [{ type: "note", text: "a", planAsk: true }, { type: "note", text: "b", planApproved: true }, { type: "note", text: "c", planApproved: "yes" }], settings: { autonomy: "plan" } });
+    check("import keeps the approval and the review note (only a true), and the level", v.timeline[0].planAsk === true && v.timeline[1].planApproved === true && !("planApproved" in v.timeline[2]) && v.settings.autonomy === "plan");
+}
+
 report();

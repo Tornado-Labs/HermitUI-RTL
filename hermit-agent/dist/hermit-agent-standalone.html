@@ -2448,7 +2448,7 @@ pre.live-output { border-color: var(--primary); }
     </div>
     <header class="app-header">
         <div class="brand">
-            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.17</span></h1>
+            <h1>HermitUI Agent <span class="version-badge" id="versionBadge">v0.3.18</span></h1>
             <span class="model-badge" id="modelBadge">🤖 model</span>
             <span class="local-badge" id="localBadge" hidden>🏠 local</span>
             <span class="protocol-badge" id="protocolBadge">🔧 auto</span>
@@ -2487,6 +2487,7 @@ pre.live-output { border-color: var(--primary); }
                             <span>Supervision</span>
                             <select id="autonomySelect">
                                 <option value="approve">Approve each step</option>
+                                <option value="plan">Plan first</option>
                                 <option value="risk">Risk-based</option>
                                 <option value="autopilot">Autopilot</option>
                             </select>
@@ -3239,7 +3240,7 @@ def hermit_clear_workspace():
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.17";
+const APP_VERSION = "0.3.18";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -4138,6 +4139,19 @@ function compactionThrashing(timeline, count, steps) {
     }
     return false;
 }
+
+// ---------- Plan first (DESIGN §2.3) ----------
+// The autonomy level in effect: "plan" while the plan waits for the user's approval (an
+// approval note in the timeline, so a rewind past it takes it back), risk-based after.
+function effectiveAutonomy(autonomy, timeline) {
+    if (autonomy !== "plan") return autonomy;
+    return (timeline || []).some(t => t && t.type === "note" && t.planApproved) ? "risk" : "plan";
+}
+
+// What the model is told when a session starts in (or switches to) Plan first.
+const PLAN_FIRST_NOTE = "The user wants to see your plan before anything changes. First look around: read and search files, and run Python that only reads. Then send your plan, and wait: until the user approves it, file changes are rolled back.";
+// Why a change was rolled back while planning.
+const PLAN_FIRST_REJECT = "Plan first: the user hasn't approved your plan yet, so file changes aren't applied. Look around without changing files, then send your plan.";
 
 // The plan the agent is following: the last one a step of the timeline set, as
 // { plan, n } (n: that step), or null. Derived, so rewind and import need nothing extra.
@@ -6261,7 +6275,7 @@ function validateSession(raw) {
         switch (it.type) {
             case "task": return { type: "task", text: str(it.text), files: strArr(it.files), ts, checkpoint: Number.isInteger(it.checkpoint) ? it.checkpoint : undefined };
             case "user": return { type: "user", text: str(it.text), kind: ["guidance", "answer", "followup"].includes(it.kind) ? it.kind : "guidance", ts };
-            case "note": return { type: "note", text: str(it.text), tone: ["info", "warn", "error"].includes(it.tone) ? it.tone : "info", ...(it.thrash === true ? { thrash: true } : {}), ts };
+            case "note": return { type: "note", text: str(it.text), tone: ["info", "warn", "error"].includes(it.tone) ? it.tone : "info", ...(it.thrash === true ? { thrash: true } : {}), ...(it.planAsk === true ? { planAsk: true } : {}), ...(it.planApproved === true ? { planApproved: true } : {}), ts };
             case "error": return { type: "error", text: str(it.text), hint: str(it.hint), ts };
             case "compaction": return { type: "compaction", reason: ["overflow", "context", "manual"].includes(it.reason) ? it.reason : "threshold", fromStep: num(it.fromStep, 0), toStep: num(it.toStep, 0), summary: str(it.summary), tokensBefore: num(it.tokensBefore, 0), tokensAfter: num(it.tokensAfter, 0), ...(str(it.focus) ? { focus: str(it.focus).slice(0, LIMITS.compactFocusChars) } : {}), ts };
             case "step": {
@@ -6326,7 +6340,7 @@ function validateSession(raw) {
         activeMs: num(raw.activeMs, 0),
         settings: {
             apiUrl: str(st.apiUrl), model: str(st.model),
-            autonomy: ["approve", "risk", "autopilot"].includes(st.autonomy) ? st.autonomy : "risk",
+            autonomy: ["approve", "plan", "risk", "autopilot"].includes(st.autonomy) ? st.autonomy : "risk",
             stepLimit: clampInt(st.stepLimit, 1, 500, 20), stepTimeoutSec: clampInt(st.stepTimeoutSec, 1, 3600, 60),
             maxTokens: clampInt(st.maxTokens, 0, 1000000, 8192), effort: ["off", "low", "medium", "high", "default"].includes(st.effort) ? st.effort : "low",
             autoCompactPct: clampInt(st.autoCompactPct, 0, 95, 85), contextSize: clampInt(st.contextSize, 0, 10000000, 0),
@@ -7422,7 +7436,7 @@ async function startTask(text) {
         { role: "system", content: systemPromptFor(S.protocol) },
         { role: "user", content: buildTaskMessage(text, files) },
     ];
-    RUN.modelNotes = [];
+    RUN.modelNotes = SETTINGS.autonomy === "plan" ? [PLAN_FIRST_NOTE] : [];
     RUN.compactAfter = 0;
     RUN.compactNext = false;
     RUN.listedKey = fileListingKey(files);
@@ -7530,6 +7544,13 @@ async function runLoop() {
                 continue;
             }
             if (outcome === "done" || outcome === "ask" || outcome === "stopped" || outcome === "error") break;
+            // Plan first: a step that sent a plan waits for the user's approval.
+            const last = S.timeline[lastStepIndex()];
+            if (outcome === "continue" && last && (last.plan || []).length && effectiveAutonomy(SETTINGS.autonomy, S.timeline) === "plan") {
+                addTimelineItem({ type: "note", tone: "info", planAsk: true, text: "📋 The plan is ready for your review. Approve it to let the agent change files, or send a note to change the plan." });
+                setStatus("paused");
+                break;
+            }
         }
     } catch (e) {
         // A bug or a malformed worker answer: show it rather than leave the loop hanging.
@@ -7932,7 +7953,7 @@ async function compactHistory(reason, focus) {
 // commit or roll back. Returns { observation, stop }.
 async function executeStep(step, idx, notes) {
     let code = step.proposedCode;
-    const autonomy = SETTINGS.autonomy;
+    const autonomy = effectiveAutonomy(SETTINGS.autonomy, S.timeline);
     if (autonomy === "approve") {
         step.phase = "pending-run";
         renderTimelineItem(idx);
@@ -8004,7 +8025,10 @@ async function executeStep(step, idx, notes) {
         if (modHint) step.notes.push(modHint);
 
         let decision = { action: "approve" };
-        if (autonomy === "risk" && risk.verdict === "ask" && !allowNetwork) {
+        const changed = effect.diff.added.length || effect.diff.modified.length || effect.diff.deleted.length;
+        if (autonomy === "plan" && changed) {
+            decision = { action: "reject", reason: PLAN_FIRST_REJECT, auto: true };
+        } else if (autonomy === "risk" && risk.verdict === "ask" && !allowNetwork) {
             step.phase = "pending-approval";
             renderTimelineItem(idx);
             renderWorkspace();
@@ -8091,10 +8115,12 @@ async function executeFileStep(step, idx, actions, notes) {
         step.changes = { added: [], modified: [], deleted: [] };
     }
 
-    const autonomy = SETTINGS.autonomy;
+    const autonomy = effectiveAutonomy(SETTINGS.autonomy, S.timeline);
     let decision = { action: "approve" };
     const hold = autonomy === "approve" || (autonomy === "risk" && effect && step.risk.verdict === "ask");
-    if (effect && effect.overLimit && autonomy !== "risk") {
+    if (effect && autonomy === "plan") {
+        decision = { action: "reject", reason: PLAN_FIRST_REJECT, auto: true };
+    } else if (effect && effect.overLimit && autonomy !== "risk") {
         decision = { action: "reject", reason: effect.overLimit, auto: true };
     } else if (hold) {
         step.phase = "pending-approval";
@@ -8294,6 +8320,16 @@ async function rewindTo(idx) {
     setStatus("paused");
     renderTimeline();
     renderWorkspace();
+}
+
+// 👍 Approve the plan (Plan first): recorded in the timeline, told to the model, and the
+// run goes on, risk-based from here.
+function approvePlan() {
+    if (RUN.active || effectiveAutonomy(SETTINGS.autonomy, S.timeline) !== "plan") return;
+    addTimelineItem({ type: "note", tone: "info", planApproved: true, text: "👍 Plan approved: the agent may change files now, risk-based from here." });
+    RUN.modelNotes.push("The user approved your plan. Go ahead with it: file changes are applied from now on.");
+    renderTimeline();
+    runLoop();
 }
 
 // Rewind to before the task and put its text back in the composer: the workspace is as
@@ -8882,6 +8918,9 @@ function buildCard(item, idx, old) {
     }
     const card = el("article", "card note-card tone-" + (item.tone || "info"));
     card.appendChild(el("p", "", item.text));
+    if (item.planAsk && idx === S.timeline.length - 1 && !RUN.active && effectiveAutonomy(SETTINGS.autonomy, S.timeline) === "plan") {
+        card.appendChild(el("div", "more-steps")).appendChild(button("👍 Approve the plan", "approve-plan", idx, "primary", "Let the agent carry out its plan, risk-based from here"));
+    }
     if (item.limit && idx === S.timeline.length - 1 && atStepLimit()) {
         const row = el("div", "more-steps");
         const label = el("label", "more-steps-label", "Run ");
@@ -9854,6 +9893,7 @@ function handleTimelineClick(e) {
         return;
     }
     if (action === "send-now") { sendNotesNow(); return; }
+    if (action === "approve-plan") { approvePlan(); return; }
     if (action === "answer-option") {
         const opt = item && (item.options || [])[Number(b.dataset.option)];
         if (opt && S.status === "awaiting-user" && idx === lastStepIndex() && !RUN.active) {
@@ -9953,7 +9993,11 @@ function wireEvents() {
         if (atStepLimit()) continueAfterLimit();
         else submitUserText("");
     });
-    $("autonomySelect").addEventListener("change", (e) => { SETTINGS.autonomy = e.target.value; });
+    $("autonomySelect").addEventListener("change", (e) => {
+        SETTINGS.autonomy = e.target.value;
+        // Switched to Plan first mid-session: the agent must hear it before its next step.
+        if (S.task && effectiveAutonomy(SETTINGS.autonomy, S.timeline) === "plan" && !RUN.modelNotes.includes(PLAN_FIRST_NOTE)) RUN.modelNotes.push(PLAN_FIRST_NOTE);
+    });
     $("effortSelect").addEventListener("change", (e) => { SETTINGS.effort = e.target.value; });
     $("newSessionBtn").addEventListener("click", async () => {
         if (RUN.active) { showToast("Stop the agent first."); return; }
