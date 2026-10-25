@@ -588,7 +588,11 @@ server instead; they are Qwen3-4B runs and counted as such:
 - **Loop guard:** blocked 5 to 11 repeats per text run on the 4B models and a few in the
   app task. Not caught: a failing `edit_file` resent with small changes each time
   (Qwen3-4B, 20 steps of "action 2 failed" on the Excel task). A guard on the same
-  error repeating would stop those runs about 15 steps earlier.
+  error repeating would stop those runs about 15 steps earlier. **Added in v0.3.21**
+  (the error-repeat guard, DESIGN §5.8): advice at the third failure in a row with the
+  same error, a pause at the fifth, so that run would have paused at step 5. Checked on
+  Qwen3.8-27B with the quick selection, 4/5 in each protocol (the miss: the known
+  `amount`/`total` flake); the guard didn't fire there. Not yet measured on a small model.
 - **Prompt size** (Qwen3-8B tokenizer): text prompt 2,907 tokens; native prompt 2,491 plus
   1,150 for the ten tool schemas, 3,997 for the first request with the template. The
   313-name package sentence is about 1,050 of that (a Qwen3.8 count from 2026-10-07). For

@@ -13,7 +13,7 @@
 // of this file by name.
 
 // ========== 1. Configuration ==========
-const APP_VERSION = "0.3.20";
+const APP_VERSION = "0.3.21";
 const PYODIDE_VERSION = "0.29.5";
 const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 // Pure-Python libraries bundled into the HTML (Phase 3.5, DESIGN §8). Pyodide leaves
@@ -59,7 +59,7 @@ const BUNDLED_LIBRARIES = {
 const SESSION_FORMAT = "hermit-agent-session";
 // 2: native tool calls (assistant tool_calls, "tool" messages; Phase 3). 1 still reads.
 const SESSION_FORMAT_VERSION = 2;
-const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3, compactFocusChars: 300, thrashCompactions: 3, thrashSteps: 4 };
+const LIMITS = { maxFiles: 5000, maxWorkspaceBytes: 256 * 1024 * 1024, maxArchiveEntries: 20000, maxArchiveBytes: 512 * 1024 * 1024, maxPathLength: 512, riskMaxFiles: 20, riskMaxBytes: 10 * 1024 * 1024, bootTimeoutMs: 120000, stepLimitIncrement: 10, readMaxLines: 400, readMaxChars: 32000, readMaxTotalChars: 64000, readMaxLineChars: 2000, compactKeepSteps: 4, compactMinSteps: 2, checkpointBudgetBytes: 512 * 1024 * 1024, checkpointKeepMin: 3, elideKeepSteps: 4, elideMinChars: 2000, retryFirstMs: 2000, retryMaxMs: 30000, retryWindowMs: 120000, streamStallMs: 180000, packageTimeoutMs: 120000, uploadWarnBytes: 50 * 1024 * 1024, uploadWarnFileBytes: 25 * 1024 * 1024, uploadWarnFiles: 500, fileListEvery: 5, stepImagesMax: 8, searchMaxMatches: 100, searchMaxFiles: 200, searchMaxLineChars: 300, searchMaxScanChars: 65536, searchMaxFileBytes: 10 * 1024 * 1024, searchMaxMs: 3000, askMaxOptions: 6, askMaxOptionChars: 200, planMaxItems: 12, planMaxStepChars: 200, planReminderStep: 2, repeatLimit: 3, errorRepeatWarn: 3, errorRepeatPause: 5, compactFocusChars: 300, thrashCompactions: 3, thrashSteps: 4 };
 const THROTTLE_MS = 80;
 
 // ========== 2. Helpers copied from HermitUI ==========
@@ -893,6 +893,50 @@ function repeatsBefore(timeline, sig) {
 // What the model is told when its action repeats the last `reps` steps and isn't run.
 function repeatAdvice(kind, reps, native) {
     return `This is the same ${kind === "files" ? "set of file actions" : "code"} as your last ${reps} steps, so it was not run again: it would give the same result. Read that result, then try a different approach, or ${native ? "call ask_user" : "ask the user (ask:)"} if you are stuck.`;
+}
+
+// The error-repeat guard: a stuck model more often resends a small variation that fails
+// the same way than the identical action. A failed step's error as a string: its failing
+// file actions (tool and path; the messages vary with the closest text they show), or
+// the last line its code printed (the exception). "" for a step that didn't fail.
+function errorSignature(step) {
+    if (!step || step.status !== "error") return "";
+    if (Array.isArray(step.fileActions)) {
+        const failed = step.fileActions.filter(a => !a.ok).map(a => a.tool + " " + (a.path || ""));
+        return failed.length ? "files:" + failed.join(", ") : "";
+    }
+    const lines = String(step.output || "").split("\n").map(l => l.trim()).filter(Boolean);
+    return "code:" + (lines.length ? lines[lines.length - 1].slice(0, 300) : "");
+}
+
+// How many steps right before this one failed with the same error. Steps the loop guard
+// didn't run and plan-only replies are passed over; anything else ends the run.
+function errorRunBefore(timeline, sig) {
+    let n = 0;
+    for (let i = (timeline || []).length - 1; i >= 0; i--) {
+        const t = timeline[i];
+        if (t && t.type === "step" && (t.status === "repeat" || t.status === "plan")) continue;
+        if (!t || t.type !== "step" || t.errSig !== sig) break;
+        n++;
+    }
+    return n;
+}
+
+// What the model is told when its step failed the same way `count` times in a row.
+function errorRepeatAdvice(sig, count, native) {
+    const ask = native ? "call ask_user" : "ask the user (ask:)";
+    if (sig.startsWith("files:")) {
+        const what = sig.slice(6);
+        const edit = /(^|, )edit_file /.test(what) ? " For edit_file, read the file again with read_file and copy the text to replace exactly from what it shows, or rewrite the whole file with write_file." : "";
+        return `Your file actions (${what}) have now failed ${count} times in a row. Sending small variations of the same action won't fix it.${edit} Otherwise try a different approach, or ${ask} if you are stuck.`;
+    }
+    const err = sig.slice(5);
+    return `Your code has now failed ${count} times in a row with the same error${err ? ` (${err})` : ""}. Another small variation of the same fix won't help: check your assumptions (print the data or object you are working with), try a different approach, or ${ask} if you are stuck.`;
+}
+
+// An extra note in an observation buildObservation already built.
+function withObservationNote(observation, note) {
+    return observation.replace(/<\/observation>$/, () => "note: " + note + "\n</observation>");
 }
 
 // The compaction thrash guard (DESIGN §5.4): true when the last `count` automatic
@@ -4622,6 +4666,20 @@ async function agentTurn() {
     const perCall = new Map((parsed.skipped || []).map(([id, why]) => [id, buildObservation({ step: n, status: "error", notes: [why] })]));
     for (const [id, obs] of outcome.perCall || []) perCall.set(id, obs);
     for (const [id, r] of planResults) perCall.set(id, r);
+    // The error-repeat guard (DESIGN §5.8): the third failure in a row with the same error
+    // comes with advice to change course; the fifth pauses the run for the user.
+    const errSig = errorSignature(step);
+    const errCount = errSig ? errorRunBefore(S.timeline.slice(0, idx), errSig) + 1 : 0;
+    if (errSig) step.errSig = errSig;
+    if (errCount >= LIMITS.errorRepeatWarn) {
+        const advice = errorRepeatAdvice(errSig, errCount, native);
+        debugLog("error", `the same error ${errCount}× in a row`, advice);
+        step.notes = [...(step.notes || []), advice];
+        outcome.observation = withObservationNote(outcome.observation, advice);
+        // Natively the step's notes go with its last call's result.
+        const lastId = parsed.kind === "files" && parsed.actions.length ? parsed.actions[parsed.actions.length - 1].id : undefined;
+        if (lastId !== undefined && perCall.has(lastId)) perCall.set(lastId, withObservationNote(perCall.get(lastId), advice));
+    }
     pushStepResult(outcome.observation, perCall);
     sendFileListingIfDue(step);
     step.checkpoint = takeCheckpoint("step " + n);
@@ -4632,6 +4690,11 @@ async function agentTurn() {
     renderTimelineItem(idx);
     renderWorkspace();
     renderStatusBar();
+    if (errCount >= LIMITS.errorRepeatPause) {
+        addNote(`🔁 The agent's steps failed the same way ${errCount} times in a row, so the run is paused. Send a note to steer it, then Continue.`, "warn");
+        setStatus("paused");
+        return "error";
+    }
     return "continue";
 }
 

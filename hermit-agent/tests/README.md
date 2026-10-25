@@ -135,7 +135,11 @@ the `FUNCS` list with the rename. Only DOM-free code can be covered this way.
   `repeatsBefore` (a different action, a note or a compaction in between ends the
   count), `repeatAdvice` in both protocols, and the limit; and the compaction thrash
   guard (`compactionThrashing`: 3 automatic compactions within 4 steps, manual ones
-  don't count, the pause note resets the count and survives an import).
+  don't count, the pause note resets the count and survives an import); and the
+  error-repeat guard (`errorSignature`: failing file actions by tool and path, code by
+  its last printed line; `errorRunBefore`: loop-guard and plan-only steps passed over;
+  `errorRepeatAdvice` per kind and protocol; `withObservationNote`; the limits; the
+  signature not imported).
 
 - **`filetools.test.mjs`** covers Phase 3.6 (DESIGN §5.1): the `search_files`,
   `delete_file` and `move_file` tags (quoted `>` in a pattern, a trailing `/`, the whole
@@ -313,7 +317,10 @@ it stall, on cue; see its docstring):
 24. **The loop guard** (`repeat`): the same code four times in a row runs twice; the third
     isn't run and the model is told why; the fourth pauses the run with a note, and
     Continue resumes it. Natively, the third identical `run_python` call gets the reason
-    as its result.
+    as its result. **The error-repeat guard** (`errloop`): five varied code steps that
+    raise the same exception all run; the third one's observation names the error and
+    advises a change of course, the fifth pauses the run with a note, and Continue
+    resumes it. Natively, the third failing `edit_file` call's result carries the advice.
 25. **The compaction thrash guard** (`thrash`): with the mock's context always past the
     threshold, three compactions within four steps pause the run with a note naming
     the context size; Continue resumes it.

@@ -303,6 +303,14 @@ plt.figure(); plt.plot([1, 1])
             *[calls(("run_python", {"code": "print('same')"})) for _ in range(3)],
             calls(("finish", {"answer": "Stopped repeating."})),
         ],
+        "E2E-ERRLOOP": [
+            *[py(f"v = {i}\nraise ValueError('bad input')") for i in range(1, 6)],
+            final("Done differently."),
+        ],
+        "E2E-NERRLOOP": [
+            *[calls(("edit_file", {"path": "missing.txt", "edits": [{"old_text": f"a{i}", "new_text": "b"}]})) for i in range(1, 4)],
+            calls(("finish", {"answer": "Gave up on the edit."})),
+        ],
         "E2E-THRASH": [
             *[py(f"print('t{i}')") for i in range(1, 16)],
             final("Done."),
@@ -1974,6 +1982,39 @@ def repeat_scenario(browser, port, state):
     page.context.close()
 
 
+def errloop_scenario(browser, port, state):
+    print("— the error-repeat guard: the same error 3 times in a row gets advice, 5 pause the run (text + native)")
+    page = open_app(browser)
+    configure(page, port, 10)
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-ERRLOOP: compute it")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'paused'", 60, "paused by the error-repeat guard")
+    steps = page.evaluate("() => S.timeline.filter(t => t.type === 'step').map(t => ({ n: t.n, status: t.status, ran: t.ranCode !== undefined }))")
+    check("all five varied steps ran, and failed", [s["ran"] for s in steps] == [True] * 5 and {s["status"] for s in steps} == {"error"}, steps)
+    m = [r["messages"][-1]["content"] for r in state.requests[n0:]]
+    check("no advice for the first two failures", not any("times in a row" in x for x in m[1:3]), [x[-200:] for x in m[1:3]])
+    check("…the third comes with advice naming the error", "failed 3 times in a row with the same error (ValueError: bad input)" in m[3] and "ask the user (ask:)" in m[3], m[3][-400:])
+    check("the fifth paused the run, with a note for the user", len(m) == 5 and "failed the same way 5 times in a row" in page.inner_text("#timeline"), len(m))
+    check("the step card shows the advice", "failed 3 times in a row" in page.inner_text(".step-card >> nth=2"))
+    page.click("#continueBtn")
+    wait_until(page, "() => S.status === 'done'", 30, "continued to the end")
+    check("Continue resumes the run", page.evaluate("() => S.timeline.filter(t => t.type === 'step').pop().content") == "Done differently.")
+    page.context.close()
+
+    page = open_app(browser)
+    configure_at(page, f"http://127.0.0.1:{port}/tools/v1", 10)
+    n0 = len(state.requests)
+    page.fill("#taskInput", "E2E-NERRLOOP: edit it")
+    page.click("#sendBtn")
+    wait_until(page, "() => S.status === 'done'", 60, "native error-loop task done")
+    second = [m for m in state.requests[n0 + 2]["messages"] if m["role"] == "tool"][-1]["content"]
+    third = [m for m in state.requests[n0 + 3]["messages"] if m["role"] == "tool"][-1]["content"]
+    check("native: no advice after the second failed edit", "times in a row" not in second, second[-300:])
+    check("native: the third failed edit's result carries the advice", "(edit_file missing.txt) have now failed 3 times in a row" in third and "read the file again with read_file" in third and "call ask_user" in third, third[-400:])
+    page.context.close()
+
+
 def thrash_scenario(browser, port, state):
     print("— the compaction thrash guard: compacting nearly every step pauses the run")
     page = open_app(browser)
@@ -2166,7 +2207,7 @@ def main():
                     files_scenario(browser, port, state, downloads=not exe)
                 for n, fn in [("workspace", workspace_scenario), ("compaction", compaction_scenario), ("vllm_compact", vllm_compact_scenario),
                               ("checkpoint_budget", checkpoint_budget_scenario), ("outage", outage_scenario), ("send_now", send_now_scenario),
-                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("thrash", thrash_scenario), ("edit_task", edit_task_scenario), ("plan_first", plan_first_scenario), ("markdown_viewer", markdown_viewer_scenario),
+                              ("diff_edit", diff_edit_scenario), ("edit_fix", edit_fix_scenario), ("encoding", encoding_scenario), ("repeat", repeat_scenario), ("errloop", errloop_scenario), ("thrash", thrash_scenario), ("edit_task", edit_task_scenario), ("plan_first", plan_first_scenario), ("markdown_viewer", markdown_viewer_scenario),
                               ("redress", redress_scenario)]:
                     if want(n):
                         fn(browser, port, state)

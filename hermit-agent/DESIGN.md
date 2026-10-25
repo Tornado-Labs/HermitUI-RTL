@@ -947,6 +947,25 @@ times with the same input). Small in-browser models (Phase 4) do it more.
   (a rerun after a failed install, say).
 - The count isn't exported (`step.sig` is dropped on import), so an imported session
   starts counting afresh.
+- **The error-repeat guard** *(added in v0.3.21)*: a stuck model more often resends a
+  small variation that fails the same way, which the identical-action check misses (the
+  Phase 4 floor run: Qwen3-4B sent 13 failing `edit_file` variations in a row and ran
+  into the step limit). A failed step's error as a string (`errorSignature`): its
+  failing file actions as tool and path (the messages vary with the closest text they
+  show), or the last line its code printed, the exception. `errorRunBefore` counts the
+  steps right before with the same error; steps the loop guard didn't run and plan-only
+  replies are passed over, anything else ends the count as above.
+  - **The third failure in a row with the same error** (`LIMITS.errorRepeatWarn`, 3)
+    still ran, so nothing is blocked: its observation (natively, the last call's result)
+    gets a note naming the error, saying small variations won't fix it and what to do
+    instead (for `edit_file`: read the file again and copy the text from it, or rewrite
+    it with `write_file`; for code: check its assumptions), or to ask the user. The step
+    card shows the same note.
+  - **The fifth pauses the run** (`LIMITS.errorRepeatPause`, 5) with a note for the
+    user. That note ends the count, so Continue starts it afresh. Two or three failures
+    of the same kind are normal debugging; even Qwen3.8-27B fixed the app task's CLI after
+    three failed tries.
+  - Like `step.sig`, `step.errSig` isn't imported.
 
 ---
 
